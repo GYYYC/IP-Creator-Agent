@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Mode = "graphic" | "video";
 type Goal = "connect" | "teach" | "save" | "follow";
@@ -57,6 +57,12 @@ type ApiSession = {
   draft: DirectorDraft;
   output: DirectorOutput;
   writebackCandidates: unknown[];
+};
+
+type ArtifactResponse = {
+  artifact: {
+    id: string;
+  };
 };
 
 type ApiResponse<T> =
@@ -158,6 +164,22 @@ type OutputSpec = {
 };
 
 const WORD_COUNT_PRESETS = ["300 字", "500 字", "800 字", "1200 字"];
+
+function fileNames(files: File[]) {
+  if (!files.length) {
+    return ["还没有选择文件"];
+  }
+
+  return files.map((file) => file.name);
+}
+
+function uploadedMaterialText(files: File[], mode: Mode) {
+  if (!files.length) {
+    return "";
+  }
+
+  return `${mode === "video" ? "视频素材" : "图文素材"}：${files.map((file) => file.name).join("、")}`;
+}
 
 function modePreset(mode: Mode, goal: Goal, outputSpec: OutputSpec) {
   if (mode === "graphic") {
@@ -316,6 +338,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     publishGoal: "收藏和评论"
   });
   const [idea, setIdea] = useState("");
+  const [materialFiles, setMaterialFiles] = useState<File[]>([]);
   const [started, setStarted] = useState(false);
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
@@ -361,6 +384,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
           publishGoal: asString(loadedSpec.publishGoal, current.publishGoal)
         }));
         setIdea(asString(input.idea));
+        setMaterialFiles([]);
         setStarted(true);
         setAnswers(loadedSession.answers);
         setSession(loadedSession);
@@ -454,6 +478,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     ? outputSpec.wordCount
     : "custom";
   const customWordCount = outputSpec.wordCount.replace(/[^\d]/g, "");
+  const canStart = Boolean(idea.trim() || materialFiles.length);
 
   function resetFlow(nextMode?: Mode) {
     if (nextMode) {
@@ -468,6 +493,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     setStarted(false);
     setAnswers([]);
     setCurrentAnswer("");
+    setMaterialFiles([]);
     setSession(null);
     setApiError("");
     setWritebackMessage("");
@@ -490,22 +516,44 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     resetFlow(nextMode);
   }
 
+  function handleMaterialFiles(event: ChangeEvent<HTMLInputElement>) {
+    setMaterialFiles(Array.from(event.target.files ?? []));
+    setSession(null);
+    setStarted(false);
+    setAnswers([]);
+    setCurrentAnswer("");
+    setApiError("");
+  }
+
   async function handleStart() {
-    if (!idea.trim()) {
+    if (!canStart) {
       return;
     }
 
     setLoading(true);
     setApiError("");
     try {
+      const artifacts = await Promise.all(
+        materialFiles.map((file) =>
+          postJson<ArtifactResponse>("/api/artifacts/register", {
+            kind: mode === "video" ? "video" : "graphic_post",
+            mimeType: file.type,
+            fileName: file.name,
+            sizeBytes: file.size
+          })
+        )
+      );
       const created = await postJson<{ session: ApiSession }>("/api/sessions", {
         module: "director",
         contentMode: mode,
+        artifactIds: artifacts.map((item) => item.artifact.id),
         input: {
-          idea,
+          idea: idea.trim() || uploadedMaterialText(materialFiles, mode),
+          materialText: idea,
           goal,
           tone,
-          outputSpec
+          outputSpec,
+          materialFileNames: fileNames(materialFiles)
         }
       });
       const run = await postJson<{ session: ApiSession }>(
@@ -624,7 +672,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
         </div>
 
         <div className="director-inline-grid">
-          <div className="input-group">
+          <div className="input-group director-control-field">
             <label htmlFor="director-size">
               {mode === "graphic" ? "这篇控制在多少字" : "这条控制在多长时间"}
             </label>
@@ -671,7 +719,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
             )}
           </div>
 
-          <div className="input-group">
+          <div className="input-group director-control-field">
             <label htmlFor="director-structure">内容展开顺序</label>
             <select
               id="director-structure"
@@ -687,7 +735,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
           </div>
         </div>
 
-        <div className="input-group">
+        <div className="input-group director-material-field">
           <label htmlFor="director-idea">{config.materialLabel}</label>
           <textarea
             id="director-idea"
@@ -698,8 +746,32 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
           />
         </div>
 
+        <label className="upload-card profile-upload-card director-upload-card">
+          <strong>{mode === "video" ? "上传视频素材" : "上传图文素材"}</strong>
+          <span>
+            {mode === "video"
+              ? "原片、片段、口播参考都可以先放这里。"
+              : "截图、首图、笔记草稿、评论截图都可以补充。"}
+          </span>
+          <input
+            accept={mode === "video" ? "video/*" : "image/*,.txt,.md,.doc,.docx"}
+            className="file-input"
+            multiple
+            onChange={handleMaterialFiles}
+            type="file"
+          />
+          <div className="director-upload-selected">
+            <strong>已选素材</strong>
+            <div className="selected-files">
+              {fileNames(materialFiles).map((name) => (
+                <span key={name}>{name}</span>
+              ))}
+            </div>
+          </div>
+        </label>
+
         <div className="director-inline-grid">
-          <div className="input-group">
+          <div className="input-group director-control-field">
             <label htmlFor="director-goal">这条内容更想带来什么结果</label>
             <select
               id="director-goal"
@@ -713,7 +785,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
             </select>
           </div>
 
-          <div className="input-group">
+          <div className="input-group director-control-field">
             <label htmlFor="director-tone">内容语气</label>
             <select
               id="director-tone"
@@ -732,7 +804,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
             <div className="director-action-bar">
               <button
                 className="button-primary"
-                disabled={!idea.trim() || loading}
+                disabled={!canStart || loading}
                 onClick={handleStart}
                 type="button"
               >

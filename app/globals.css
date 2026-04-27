@@ -1184,6 +1184,75 @@ svg {
   min-height: 320px;
 }
 
+.director-input-panel {
+  align-content: start;
+  gap: 18px;
+}
+
+.director-stats {
+  align-items: stretch;
+}
+
+.director-stat {
+  display: grid;
+  align-content: center;
+  min-height: 104px;
+}
+
+.director-stat strong {
+  font-size: 22px;
+}
+
+.director-inline-grid {
+  align-items: start;
+}
+
+.director-control-field {
+  align-content: start;
+  min-height: 118px;
+}
+
+.director-control-field select,
+.director-control-field input {
+  min-height: 64px;
+}
+
+.director-material-field textarea {
+  min-height: 188px;
+  resize: vertical;
+}
+
+.director-upload-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 150px;
+}
+
+.director-upload-selected {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.director-upload-selected strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.director-upload-selected .selected-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.director-upload-selected .selected-files span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .panel-title,
 .director-thread-title,
 .question-card,
@@ -1953,6 +2022,10 @@ html[data-theme="light"] .history-filter:focus-visible {
   .dashboard-feature-grid,
   .record-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .director-control-field {
+    min-height: auto;
   }
 }
 
