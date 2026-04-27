@@ -1,28 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Mode = "graphic" | "video";
 type Goal = "connect" | "teach" | "save" | "follow";
 type Tone = "warm" | "sharp" | "clear";
+type DirectorSlotKey = "rootProblem" | "changeTarget" | "corePromise";
+type DirectorSlotStatus = "empty" | "partial" | "ready";
 
 type ThreadMessage = {
   role: "assistant" | "user";
   text: string;
 };
 
-type ChoiceSet = {
-  question: string;
-  options: Array<{
-    key: string;
-    text: string;
-  }>;
+type DirectorSlot = {
+  status: DirectorSlotStatus;
+  value: string;
+  confidence: number;
+  missing: string[];
+  evidence: string[];
 };
+
+type DirectorSlots = Record<DirectorSlotKey, DirectorSlot>;
 
 type DirectorDraft = {
   intro?: string;
   cards?: Array<{ title: string; content: string }>;
   hooks?: string[];
+  directorSlots?: DirectorSlots;
+  nextSlot?: DirectorSlotKey | null;
+  suggestions?: string[];
 };
 
 type DirectorOutput = {
@@ -68,7 +75,6 @@ const MODE_CONFIG: Record<
     label: string;
     materialLabel: string;
     placeholder: string;
-    questions: string[];
     primaryLabels: string[];
   }
 > = {
@@ -77,11 +83,6 @@ const MODE_CONFIG: Record<
     materialLabel: "这篇笔记现在有的想法、经历或素材",
     placeholder:
       "例如：我想写一篇关于考研失败后如何重新进入状态的笔记，想讲自己二战时是怎么一点点恢复节奏的。",
-    questions: [
-      "这篇内容最想解决读者的哪个具体问题？",
-      "你手里最能证明这件事的细节是什么？",
-      "读者看完之后，你希望他先做哪一步？"
-    ],
     primaryLabels: ["标题方向", "正文结构", "结尾引导"]
   },
   video: {
@@ -89,12 +90,49 @@ const MODE_CONFIG: Record<
     materialLabel: "这条视频现在有的想法、经历或素材",
     placeholder:
       "例如：我想做一期关于考研失败后如何重新进入状态的视频，想讲自己二战时最难熬的那一个月。",
-    questions: [
-      "这条内容最想解决观众的哪个具体问题？",
-      "你手里最能证明这件事的细节是什么？",
-      "观众看完之后，你希望他先做哪一步？"
-    ],
     primaryLabels: ["开头", "中段", "结尾"]
+  }
+};
+
+const SLOT_LABELS: Record<DirectorSlotKey, string> = {
+  rootProblem: "谁会停下",
+  changeTarget: "想让他做什么",
+  corePromise: "记住哪句话"
+};
+
+const SLOT_STATUS_LABELS: Record<DirectorSlotStatus, string> = {
+  empty: "待定",
+  partial: "进行中",
+  ready: "已定"
+};
+
+const SLOT_DONE_LABELS: Record<DirectorSlotKey, string> = {
+  rootProblem: "已定人群",
+  changeTarget: "动作清楚了",
+  corePromise: "这句能收住"
+};
+
+const EMPTY_SLOTS: DirectorSlots = {
+  rootProblem: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: [],
+    evidence: []
+  },
+  changeTarget: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: [],
+    evidence: []
+  },
+  corePromise: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: [],
+    evidence: []
   }
 };
 
@@ -224,70 +262,6 @@ async function fetchJson<T>(url: string) {
   return payload.data;
 }
 
-function isOptionRequest(value: string) {
-  return /选项|选择|举例|不知道|怎么答|给我/.test(value);
-}
-
-function normalizeChoiceKey(value: string) {
-  const trimmed = value.trim().toUpperCase();
-  const match = trimmed.match(/^[A-D]/);
-  return match?.[0] ?? "";
-}
-
-function buildChoiceSet(question: string, mode: Mode, idea: string): ChoiceSet {
-  const topic = idea.trim() || (mode === "video" ? "这条视频" : "这篇笔记");
-
-  if (question.includes("记住") || question.includes("收藏")) {
-    return {
-      question,
-      options: [
-        { key: "A", text: "失败后最先要恢复的不是学习时长，而是每天能坐回书桌前的节奏。" },
-        { key: "B", text: "普通人二战最难的不是重学，而是不被上一次失败拖着走。" },
-        { key: "C", text: "状态崩掉时，不要先逼自己鸡血，先做一个小到不会失败的动作。" },
-        { key: "D", text: "这条内容想让观众相信：低谷期也能用很小的步骤重新启动。" }
-      ]
-    };
-  }
-
-  if (question.includes("经历") || question.includes("方法")) {
-    return {
-      question,
-      options: [
-        { key: "A", text: "先讲一个真实崩溃场景，再给出 3 个恢复节奏的动作。" },
-        { key: "B", text: "先直接给方法，再用自己的二战经历证明这些动作有效。" },
-        { key: "C", text: "先讲观众最熟悉的痛点，再把经历和方法穿插起来。" },
-        { key: "D", text: "先抛一个反常识判断，再解释自己是怎么一步步验证的。" }
-      ]
-    };
-  }
-
-  if (question.includes("细节") || question.includes("证明")) {
-    return {
-      question,
-      options: [
-        { key: "A", text: "最崩溃时连续几天打开书却一个字都看不进去。" },
-        { key: "B", text: "看到同学进度很快，自己连朋友圈都不敢点开。" },
-        { key: "C", text: "给自己排了很狠的计划，但只撑了三天就彻底断掉。" },
-        { key: "D", text: "真正拉回状态的是每天只完成一个最小学习动作。" }
-      ]
-    };
-  }
-
-  return {
-    question,
-    options: [
-      { key: "A", text: `围绕“${topic}”先讲一个最真实的低谷瞬间。` },
-      { key: "B", text: `围绕“${topic}”先给一个最能帮到人的具体动作。` },
-      { key: "C", text: `围绕“${topic}”先讲一个观众会立刻共鸣的判断。` },
-      { key: "D", text: `围绕“${topic}”先把失败前后的变化讲清楚。` }
-    ]
-  };
-}
-
-function formatChoiceSet(choiceSet: ChoiceSet) {
-  return choiceSet.options.map((option) => `${option.key}. ${option.text}`).join("\n");
-}
-
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
@@ -296,6 +270,38 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function normalizeSlotStatus(value: unknown): DirectorSlotStatus {
+  return value === "partial" || value === "ready" ? value : "empty";
+}
+
+function normalizeStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
+function normalizeSlot(value: unknown): DirectorSlot {
+  const record = asRecord(value);
+
+  return {
+    status: normalizeSlotStatus(record.status),
+    value: asString(record.value),
+    confidence: typeof record.confidence === "number" ? record.confidence : 0,
+    missing: normalizeStringList(record.missing),
+    evidence: normalizeStringList(record.evidence)
+  };
+}
+
+function normalizeSlots(value: unknown): DirectorSlots {
+  const record = asRecord(value);
+
+  return {
+    rootProblem: normalizeSlot(record.rootProblem ?? EMPTY_SLOTS.rootProblem),
+    changeTarget: normalizeSlot(record.changeTarget ?? EMPTY_SLOTS.changeTarget),
+    corePromise: normalizeSlot(record.corePromise ?? EMPTY_SLOTS.corePromise)
+  };
 }
 
 export function DirectorStudio({ initialSessionId }: { initialSessionId?: string } = {}) {
@@ -313,13 +319,13 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
   const [started, setStarted] = useState(false);
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
-  const [revisionInput, setRevisionInput] = useState("");
   const [writebackMessage, setWritebackMessage] = useState("");
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
   const [sideMessages, setSideMessages] = useState<ThreadMessage[]>([]);
-  const [choiceSet, setChoiceSet] = useState<ChoiceSet | null>(null);
+  const [editingSlot, setEditingSlot] = useState<DirectorSlotKey | null>(null);
+  const answerRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!initialSessionId) {
@@ -358,10 +364,8 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
         setStarted(true);
         setAnswers(loadedSession.answers);
         setSession(loadedSession);
-        setRevisionInput("");
         setWritebackMessage("");
         setSideMessages([]);
-        setChoiceSet(null);
       } catch (error) {
         if (!cancelled) {
           setApiError(error instanceof Error ? error.message : "这条记录暂时没有打开成功。");
@@ -384,15 +388,20 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
   const stats = modePreset(mode, goal, outputSpec);
   const sessionAnswers = session?.answers ?? answers;
   const output = session?.output ?? {};
-  const maxTurns = session?.followupBudget ?? config.questions.length;
-  const isFinished =
-    started &&
-    (session?.status === "completed" || sessionAnswers.length >= maxTurns);
+  const slots = normalizeSlots(session?.draft?.directorSlots);
+  const suggestions = session?.draft?.suggestions ?? [];
+  const nextSlot = session?.draft?.nextSlot ?? null;
+  const revisionRequests = Array.isArray(session?.input?.revisionRequests)
+    ? session.input.revisionRequests.filter((item): item is string => typeof item === "string")
+    : [];
+  const isDraftReady = started && (session?.status === "completed" || Boolean(output.finalScript));
   const currentQuestion =
-    started && !isFinished
-      ? (session?.askedQuestions[session.askedQuestions.length - 1] ??
-        config.questions[sessionAnswers.length])
-      : null;
+    editingSlot
+      ? `把“${SLOT_LABELS[editingSlot]}”改成什么？`
+      : started && session?.status === "collecting"
+      ? (session?.askedQuestions[session.askedQuestions.length - 1] ?? "")
+      : "";
+  const visibleSuggestions = currentQuestion && !editingSlot ? suggestions : [];
 
   const localDraft = useMemo(
     () => buildDraft(mode, goal, tone, idea, sessionAnswers),
@@ -409,14 +418,8 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
       return [];
     }
 
-    const items: ThreadMessage[] = [
-      {
-        role: "assistant",
-        text: `收到，你现在想做一条${config.label}内容。我会边问边整理草稿，先把最关键的信息补齐。`
-      }
-    ];
-
-    const questions = session?.askedQuestions.length ? session.askedQuestions : config.questions;
+    const items: ThreadMessage[] = [];
+    const questions = session?.askedQuestions.length ? session.askedQuestions : [];
 
     questions.forEach((question, index) => {
       if (index === 0 || sessionAnswers[index - 1]) {
@@ -428,21 +431,20 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
       }
     });
 
-    if (isFinished) {
-      items.push({
-        role: "assistant",
-        text: `可以了，这一轮核心信息已经够了。我先按现在这版给你整理草稿，你还可以继续回来补细节。`
-      });
-    }
+    revisionRequests.forEach((request) => {
+      items.push({ role: "user", text: request });
+    });
 
     return [...items, ...sideMessages];
-  }, [config.label, config.questions, isFinished, session?.askedQuestions, sessionAnswers, sideMessages, started]);
+  }, [revisionRequests, session?.askedQuestions, sessionAnswers, sideMessages, started]);
 
   const draftNote = !started
-    ? `先把素材放进来，马上整理第一版${mode === "graphic" ? "笔记" : "脚本"}。`
+    ? `先写下这条${mode === "graphic" ? "笔记" : "视频"}的素材。`
     : sessionAnswers.length === 0
-      ? `已根据你的素材生成第一版${mode === "graphic" ? "笔记结构" : "脚本结构"}。`
-      : `最近一轮已经写进草稿：${sessionAnswers[sessionAnswers.length - 1]}`;
+      ? "先选一个方向。"
+      : isDraftReady
+        ? "继续补充你想改的地方。"
+        : `当前判断：${sessionAnswers[sessionAnswers.length - 1]}`;
   const finalScript = output.finalScript ?? "";
   const titleOptions = output.titleOptions ?? [];
   const publishChecklist = output.publishChecklist ?? [];
@@ -466,12 +468,11 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     setStarted(false);
     setAnswers([]);
     setCurrentAnswer("");
-    setRevisionInput("");
     setSession(null);
     setApiError("");
     setWritebackMessage("");
     setSideMessages([]);
-    setChoiceSet(null);
+    setEditingSlot(null);
   }
 
   function updateOutputSpec(key: keyof OutputSpec, value: string) {
@@ -515,7 +516,6 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
       setSession(run.session);
       setAnswers(run.session.answers);
       setSideMessages([]);
-      setChoiceSet(null);
     } catch (error) {
       setApiError(error instanceof Error ? error.message : "暂时没有连上后端，已先保留本地草稿。");
       setStarted(true);
@@ -525,76 +525,49 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
   }
 
   async function handleSubmitAnswer() {
-    if (!currentAnswer.trim() || !currentQuestion) {
+    if (!currentAnswer.trim()) {
       return;
     }
 
     const answer = currentAnswer.trim();
-    if (isOptionRequest(answer) && currentQuestion) {
-      const nextChoiceSet = buildChoiceSet(currentQuestion, mode, idea);
-      setChoiceSet(nextChoiceSet);
-      setSideMessages((value) => [
-        ...value,
-        { role: "user", text: answer },
-        {
-          role: "assistant",
-          text: `可以，选一个最接近你的，也可以直接改写成你自己的版本：\n${formatChoiceSet(nextChoiceSet)}`
-        }
-      ]);
-      setCurrentAnswer("");
-      return;
-    }
-
-    const choiceKey = normalizeChoiceKey(answer);
-    const expandedAnswer =
-      choiceSet?.options.find((option) => option.key === choiceKey)?.text ?? answer;
+    const isSlotEdit = Boolean(editingSlot);
+    const isRevision = !isSlotEdit && (!currentQuestion || isDraftReady);
 
     setLoading(true);
     setApiError("");
     try {
       if (!session) {
-        setAnswers((value) => [...value, expandedAnswer]);
+        setAnswers((value) => [...value, answer]);
         return;
       }
 
       await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/respond`, {
-        answer: expandedAnswer
+        answer,
+        ...(isSlotEdit ? { kind: "slot_revision", targetSlot: editingSlot } : {}),
+        ...(isRevision ? { kind: "revision" } : {})
       });
       const run = await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/run`);
       setSession(run.session);
       setAnswers(run.session.answers);
-      setChoiceSet(null);
       setSideMessages([]);
+      setEditingSlot(null);
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : "这一轮没有连上后端，已先写入本地草稿。");
-      setAnswers((value) => [...value, expandedAnswer]);
+      setApiError(error instanceof Error ? error.message : "没有保存成功，请再试一次。");
+      if (!isRevision && !isSlotEdit) {
+        setAnswers((value) => [...value, answer]);
+      } else {
+        setSideMessages((value) => [...value, { role: "user", text: answer }]);
+      }
     } finally {
       setCurrentAnswer("");
       setLoading(false);
     }
   }
 
-  async function handleRevision() {
-    if (!session?.id || !revisionInput.trim()) {
-      return;
-    }
-
-    setLoading(true);
-    setApiError("");
-    setWritebackMessage("");
-    try {
-      await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/respond`, {
-        answer: revisionInput.trim(),
-        kind: "revision"
-      });
-      const run = await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/run`);
-      setSession(run.session);
-      setRevisionInput("");
-    } catch (error) {
-      setApiError(error instanceof Error ? error.message : "这一轮没有连上后端，请稍后再试。");
-    } finally {
-      setLoading(false);
-    }
+  function startSlotEdit(slotKey: DirectorSlotKey) {
+    setEditingSlot(slotKey);
+    setCurrentAnswer(slots[slotKey].value);
+    window.requestAnimationFrame(() => answerRef.current?.focus());
   }
 
   async function writeBack() {
@@ -621,7 +594,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
         <div className="panel-title">
           <span className="label">共创台</span>
           <h2>{mode === "graphic" ? "先把这篇笔记的素材放进来" : "先把这条视频的素材放进来"}</h2>
-          <p>选好模式和规格，再顺着当前问题往下写。</p>
+          <p>写下素材，先抓住方向。</p>
         </div>
 
         <div className="mode-switch">
@@ -710,7 +683,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
               <option value="结论 + 反常识 + 例子">先给结论，再讲例子</option>
               <option value="故事 + 转折 + 评论引导">先讲故事，再引评论</option>
             </select>
-            <p className="field-hint">先定顺序，后面可以继续改。</p>
+            <p className="field-hint">选择这次先讲什么。</p>
           </div>
         </div>
 
@@ -772,20 +745,41 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
           <div className="surface-card glass director-thread-panel">
             <div className="director-thread-head">
               <div className="director-thread-title">
-                <span className="label">共创中</span>
-                <h3>{isFinished ? "这一轮已经写完" : `第 ${sessionAnswers.length + 1} 轮问题`}</h3>
+                <span className="label">{editingSlot ? SLOT_LABELS[editingSlot] : nextSlot ? SLOT_LABELS[nextSlot] : "继续打磨"}</span>
+                <h3>{currentQuestion ? "回答这句" : "补充细节或提出修改要求"}</h3>
               </div>
-              <span className="muted">
-                已回答 {sessionAnswers.length} / 最多 {maxTurns}
-              </span>
+              <span className="muted">{isDraftReady ? "可继续改" : "先定当前方向"}</span>
             </div>
 
-            {!isFinished ? (
-              <div className="callout">
-                <strong>当前问题</strong>
-                <p>{currentQuestion}</p>
-              </div>
-            ) : null}
+            <div className="director-slot-strip" aria-label="内容方向">
+              {(["rootProblem", "changeTarget", "corePromise"] as DirectorSlotKey[]).map((key) => (
+                <button
+                  className={`director-slot-pill ${slots[key].status} ${editingSlot === key ? "editing" : ""}`}
+                  key={key}
+                  onClick={() => startSlotEdit(key)}
+                  type="button"
+                >
+                  <span>{SLOT_LABELS[key]}</span>
+                  <strong>{SLOT_STATUS_LABELS[slots[key].status]}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="director-target-list">
+              {(["rootProblem", "changeTarget", "corePromise"] as DirectorSlotKey[])
+                .filter((key) => slots[key].status === "ready" && slots[key].value)
+                .map((key) => (
+                  <div className="director-target-card" key={key}>
+                    <div>
+                      <span>{SLOT_DONE_LABELS[key]}</span>
+                      <strong>{slots[key].value}</strong>
+                    </div>
+                    <button onClick={() => startSlotEdit(key)} type="button">
+                      改一下
+                    </button>
+                  </div>
+                ))}
+            </div>
 
             <div className="director-thread">
               {thread.map((message, index) => (
@@ -799,94 +793,75 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
               ))}
             </div>
 
-            {!isFinished ? (
-              <div className="input-group">
-                <label htmlFor="director-answer">直接回答这一轮问题</label>
-                <textarea
-                  id="director-answer"
-                  onChange={(event) => setCurrentAnswer(event.target.value)}
-                  placeholder="像聊天一样回答就行；也可以输入 A/B/C/D 选择上面的选项。"
-                  rows={4}
-                  value={currentAnswer}
-                />
-                {choiceSet ? (
-                  <div className="director-choice-grid">
-                    {choiceSet.options.map((option) => (
-                      <button
-                        className="choice-chip"
-                        key={option.key}
-                        onClick={() => setCurrentAnswer(`${option.key}. ${option.text}`)}
-                        type="button"
-                      >
-                        <strong>{option.key}</strong>
-                        <span>{option.text}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="director-thread-actions">
-                  <button
-                    className="button-primary"
-                    disabled={loading}
-                    onClick={handleSubmitAnswer}
-                    type="button"
+            <div className="input-group">
+              <label htmlFor="director-answer">
+                {editingSlot ? `修改${SLOT_LABELS[editingSlot]}` : currentQuestion ? "回答这句" : "继续补充"}
+              </label>
+              <textarea
+                ref={answerRef}
+                id="director-answer"
+                onChange={(event) => setCurrentAnswer(event.target.value)}
+                placeholder={
+                  editingSlot
+                    ? "写下你想改成的方向。"
+                    : currentQuestion
+                    ? "直接写你的判断，不用整理成完整句。"
+                    : "例如：开头更直接一点；第二段加真实经历；结尾不要太像教程。"
+                }
+                rows={4}
+                value={currentAnswer}
+              />
+              <div className="director-thread-actions">
+                <button
+                  className="button-primary"
+                  disabled={loading || !currentAnswer.trim()}
+                  onClick={handleSubmitAnswer}
+                  type="button"
                   >
-                    {loading ? "正在改稿" : "提交这轮回答"}
-                  </button>
+                  {loading ? "正在调整" : editingSlot ? "确认修改" : currentQuestion ? "提交回答" : "继续改"}
+                </button>
+                {editingSlot ? (
                   <button
-                    className="button-secondary"
-                    disabled={loading || !currentQuestion}
+                    className="button-ghost"
                     onClick={() => {
-                      if (!currentQuestion) {
-                        return;
-                      }
-
-                      const nextChoiceSet = buildChoiceSet(currentQuestion, mode, idea);
-                      setChoiceSet(nextChoiceSet);
-                      setSideMessages((value) => [
-                        ...value,
-                        {
-                          role: "assistant",
-                          text: `可以，选一个最接近你的，也可以直接改写成你自己的版本：\n${formatChoiceSet(nextChoiceSet)}`
-                        }
-                      ]);
+                      setEditingSlot(null);
+                      setCurrentAnswer("");
                     }}
                     type="button"
                   >
-                    给我选项
+                    先不改
                   </button>
-                  <button className="button-secondary" onClick={() => resetFlow()} type="button">
-                    重新开始
-                  </button>
-                </div>
-                {apiError ? <p className="muted">{apiError}</p> : null}
+                ) : null}
+                <button className="button-secondary" onClick={() => resetFlow()} type="button">
+                  写下一条
+                </button>
               </div>
-            ) : (
-              <div className="input-group">
-                <label htmlFor="director-revision">继续改这一版</label>
-                <textarea
-                  id="director-revision"
-                  onChange={(event) => setRevisionInput(event.target.value)}
-                  placeholder="例如：把开头写得更直接一点，或者解释一下第二段为什么这样写。"
-                  rows={4}
-                  value={revisionInput}
-                />
-                <div className="director-thread-actions">
+              {visibleSuggestions.length ? (
+                <div className="director-suggestion-row" aria-label="可选方向">
+                  {visibleSuggestions.map((suggestion) => (
+                    <button
+                      className="suggestion-chip"
+                      key={suggestion}
+                      onClick={() => setCurrentAnswer(suggestion)}
+                      type="button"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
                   <button
-                    className="button-primary"
-                    disabled={loading || !revisionInput.trim() || !session}
-                    onClick={handleRevision}
+                    className="suggestion-chip self-write"
+                    onClick={() => {
+                      setCurrentAnswer("");
+                      answerRef.current?.focus();
+                    }}
                     type="button"
                   >
-                    {loading ? "正在调整" : "继续调整"}
-                  </button>
-                  <button className="button-secondary" onClick={() => resetFlow()} type="button">
-                    写下一条
+                    我自己写
                   </button>
                 </div>
-                {apiError ? <p className="muted">{apiError}</p> : null}
-              </div>
-            )}
+              ) : null}
+              {apiError ? <p className="muted">{apiError}</p> : null}
+            </div>
           </div>
         )}
       </section>

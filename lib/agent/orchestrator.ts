@@ -21,14 +21,7 @@ export async function runAgentSession(
     await callJsonModel({
       system: `${getModuleSystemPrompt(session.module)}
 必须返回如下 JSON 字段：
-{
-  "status": "collecting|ready|completed",
-  "assistantMessage": "给用户看的简短说明",
-  "nextQuestion": "如果还需要追问，给出下一问；否则为空字符串",
-  "draft": {},
-  "output": {},
-  "writebackCandidates": []
-}`,
+${resultSchemaForModule(session.module)}`,
       user: {
         brain: summarizeBrainForPrompt(brain.profile),
         recentMemories: brain.memories.slice(0, 8),
@@ -42,6 +35,72 @@ export async function runAgentSession(
 
   const nextSession = mergeRunIntoSession(session, result);
   return upsertSession(nextSession);
+}
+
+function resultSchemaForModule(module: AgentSession["module"]) {
+  if (module === "director") {
+    return `{
+  "status": "collecting|ready|completed",
+  "assistantMessage": "给用户看的简短说明",
+  "nextQuestion": "如果还需要追问，给出下一问；否则为空字符串",
+  "nextSlot": "rootProblem|changeTarget|corePromise|null",
+  "replyType": "answer|confused|unknown|ask_options|revision|off_track",
+  "nextAction": "ask|offer_options|draft",
+  "suggestions": [],
+  "slots": {
+    "rootProblem": { "status": "empty|partial|ready", "value": "", "confidence": 0, "missing": [], "evidence": [] },
+    "changeTarget": { "status": "empty|partial|ready", "value": "", "confidence": 0, "missing": [], "evidence": [] },
+    "corePromise": { "status": "empty|partial|ready", "value": "", "confidence": 0, "missing": [], "evidence": [] }
+  },
+  "draft": {},
+  "output": {},
+  "writebackCandidates": []
+}`;
+  }
+
+  if (module === "assistant") {
+    return `{
+  "status": "collecting|completed",
+  "assistantMessage": "给用户看的简短说明",
+  "nextQuestion": "如果还需要补材料，给出下一句；否则为空字符串",
+  "draft": {},
+  "output": {
+    "assistantMode": "single_comment|comment_direction",
+    "workSummary": "一句话概括作品上下文",
+    "analysis": {
+      "commentIntent": "",
+      "audienceEmotion": "",
+      "hiddenNeed": "",
+      "contentOpportunity": "",
+      "replyDirection": "",
+      "nextContentDirection": "",
+      "sectionDirection": ""
+    },
+    "layers": [{ "type": "", "quote": "", "action": "" }],
+    "risks": [],
+    "commentStrategy": {
+      "priority": "",
+      "replyGoal": "",
+      "tone": "",
+      "directions": [],
+      "avoid": [],
+      "nextMove": ""
+    },
+    "replySuggestions": [],
+    "nextTopics": []
+  },
+  "writebackCandidates": []
+}`;
+  }
+
+  return `{
+  "status": "collecting|ready|completed",
+  "assistantMessage": "给用户看的简短说明",
+  "nextQuestion": "如果还需要追问，给出下一问；否则为空字符串",
+  "draft": {},
+  "output": {},
+  "writebackCandidates": []
+}`;
 }
 
 function mergeRunIntoSession(session: AgentSession, result: AgentRunResult): AgentSession {

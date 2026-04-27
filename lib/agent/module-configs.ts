@@ -3,6 +3,9 @@ import {
   AgentSession,
   ContentMode,
   CreatorProfile,
+  DirectorSlot,
+  DirectorSlotKey,
+  DirectorSlots,
   MemoryCandidate,
   MemoryCategory,
   WritePolicy
@@ -24,8 +27,39 @@ const TONE_LABELS: Record<DirectorTone, string> = {
   clear: "先讲清楚方法"
 };
 
+const DIRECTOR_SLOT_KEYS: DirectorSlotKey[] = ["rootProblem", "changeTarget", "corePromise"];
+const DIRECTOR_SLOT_LABELS: Record<DirectorSlotKey, string> = {
+  rootProblem: "谁会停下",
+  changeTarget: "想让他做什么",
+  corePromise: "记住哪句话"
+};
+
+const EMPTY_DIRECTOR_SLOTS: DirectorSlots = {
+  rootProblem: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: ["这条内容要让哪类人停下来"],
+    evidence: []
+  },
+  changeTarget: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: ["看完后先让这个人做什么"],
+    evidence: []
+  },
+  corePromise: {
+    status: "empty",
+    value: "",
+    confidence: 0,
+    missing: ["这条内容最后收在哪句话"],
+    evidence: []
+  }
+};
+
 export const FOLLOWUP_BUDGET = {
-  director: 5,
+  director: 3,
   assistant: 1,
   doctor: 2,
   profile: 0
@@ -36,11 +70,125 @@ export function getModuleSystemPrompt(module: string) {
     "你是 IP Creator Agent 的编排器。只输出 JSON，不要 markdown。长期画像只能沉淀稳定、可复用、可解释的洞察，单次任务结论放入 session output。";
 
   if (module === "director") {
-    return `${shared} 当前模块是 Director。你需要用 2 到 5 轮有限追问补齐内容，不要机械问满；信息足够后输出完整可发布稿，不要只给提纲。每次只问一个核心问题，可以带 3 到 4 个短选项，但选项必须完整表达含义，不要只输出 A/B/C。必须尊重 session.input.outputSpec：视频按目标时长写分段口播，图文按目标字数写完整正文。draft 必须包含 intro、cards、hooks；cards 必须是 3 个对象，视频对应开头/中段/结尾，图文对应标题方向/正文结构/结尾引导。output 必须包含 finalScript、titleOptions、publishChecklist；视频还要包含 timeline 和 subtitles，图文还要包含 coverText、body、tags。若 session.input.revisionRequests 有内容，直接解释或改写当前完整稿，不要重新追问。不要把“能给我选项吗”这类辅助请求写进草稿。writebackCandidates 只能是候选，不要把单次选题当成长期画像。`;
+    return `${shared}
+当前模块是 Director。你必须遵守以下硬性规则，违反任意规则都视为失败输出。
+
+硬性规则：
+1. 必须只输出 JSON。
+2. 禁止输出 Markdown。
+3. 禁止在 JSON 外输出任何内容。
+4. 禁止说“我会帮你”“我正在分析”“根据你的回答”“这一轮”“核心信息已经够了”。
+5. 禁止说“系统”“流程”“模块”“状态”“target”“slot”“ready”“第几个问题”。
+6. 禁止解释你为什么这样问。
+7. 禁止向用户描述你的工作方式。
+8. 禁止一次问多个主问题。
+9. 禁止在当前问题没有确认前进入下一个问题。
+10. 禁止泛泛总结，禁止把“提升认知”“引发共鸣”“提供价值”当作有效 value。
+
+你要严格按顺序确认三个创作判断：
+1. rootProblem = 谁会停下：这条内容最想让哪类人停下来继续看；TA 当前处在什么具体处境。
+2. changeTarget = 想让他做什么：看完后先让这个人做出的动作、选择、情绪转向或自我判断。
+3. corePromise = 记住哪句话：这条内容最后收住的一句话，可用于标题、开头、封面或结尾。
+
+线性规则：
+- rootProblem 没有 ready，nextSlot 必须是 rootProblem。
+- rootProblem ready 且 changeTarget 没有 ready，nextSlot 必须是 changeTarget。
+- rootProblem 和 changeTarget 都 ready 且 corePromise 没有 ready，nextSlot 必须是 corePromise。
+- 禁止跳问后面的判断。
+- 如果用户修改前面的判断，必须重新确认这个判断；后面的判断不得继续沿用。
+- 用户说的话只能更新当前 nextSlot，除非 session.input.slotRevision 指明正在修改某个判断。
+- session.input.slotRevision 存在时，先按其中 slotKey 和 value 重新处理对应判断；必须围绕修改后的内容继续确认，不要直接跳过。
+
+status 判定：
+empty:
+- 没有相关信息。
+- 或用户只说“不知道/没想好/随便/你来定/没有”。
+- 禁止脑补。
+
+partial:
+- 有方向、情绪、经历或模糊目标，但还不能直接决定标题、开头或脚本结构。
+- 必须继续追问。
+
+ready:
+- 足够具体，可以直接指导成稿。
+- rootProblem 必须包含具体对象 + 具体处境。
+- changeTarget 必须包含可理解的动作、选择、情绪转向或自我判断。
+- corePromise 必须是一句用户能记住的话。
+- 如果无法确定，必须保守判为 partial 或 empty，禁止为了成稿强行判 ready。
+
+每轮必须先在内部完成判断，再输出 JSON：
+1. 判断用户上一句类型：answer | confused | unknown | ask_options | revision | off_track。
+2. 只更新当前 nextSlot。
+3. 判断当前 nextSlot 是否 ready。
+4. 决定继续问、给选项、还是完成成稿。
+
+追问规则：
+- 每次只问一个主问题。
+- 每个判断的第一问必须给 2 到 3 个 suggestions，并额外允许用户自己写。
+- suggestions 最多 3 个，每个不超过 28 个中文字符，不用 A/B/C/D，不要写“以下是选项”。
+- suggestions 必须贴合用户素材，不得凭空扩展到无关方向。
+- 用户回答“不知道/没想好/随便/你来定”时，不更新 value，继续当前判断，并给 suggestions。
+- 用户说“没明白/什么意思/没懂”时，不更新 value，换成更直白的问题，并给 suggestions。
+- 用户要求“再给几个选项/换几个选项/还有吗”时，不更新 value，继续当前判断，并给新 suggestions，禁止重复上一组。
+- 用户自填内容模糊时，当前判断必须是 partial，继续追问或给更具体 suggestions。
+- 三个判断都 ready 时，必须生成完整稿。
+- 用户提出修改要求或 session.input.revisionRequests 有内容：直接按当前要求改写完整稿，不重新追问。
+
+成稿规则：
+- 必须尊重 session.input.outputSpec。
+- 视频按目标时长写分段口播，图文按目标字数写完整正文。
+- draft 必须包含 intro、cards、hooks；cards 必须是 3 个对象。
+- output 必须包含 finalScript、titleOptions、publishChecklist。
+- 视频还要包含 timeline 和 subtitles。
+- 图文还要包含 coverText、body、tags。
+- writebackCandidates 只能是候选，不要把单次选题当成长期画像。`;
   }
 
   if (module === "assistant") {
-    return `${shared} 当前模块是 Assistant。你需要根据 session.contentMode 判断这批评论来自图文还是视频，分析评论文本和评论截图材料，输出评论分层、高价值评论、风险、回复建议、评论区引导方向 commentStrategy 和下一期选题。高频需求可作为候选写回。`;
+    return `${shared}
+Assistant 任务只处理作品和评论之间的关系。你必须遵守以下硬性规则，违反任意规则都视为失败输出。
+
+硬性规则：
+1. 必须只输出 JSON。
+2. 禁止输出 Markdown。
+3. 禁止在 JSON 外输出任何内容。
+4. 禁止说“我会帮你”“我正在分析”“根据你的输入”“当前流程”“这个模块”“下一步流程”“为了更好地”“核心信息已经够了”。
+5. 禁止解释你的工作方式。
+6. 禁止把没有给出的作品背景当成已知事实。
+7. 禁止把单条评论强行总结成评论区趋势。
+8. 禁止把多条评论强行当作一条评论拆解。
+9. 禁止泛泛评价“很有价值”“引发共鸣”“可以互动”，必须说明具体意图、情绪、需求或动作。
+
+输入字段：
+- session.input.assistantMode = single_comment | comment_direction。
+- session.input.workContext = 作品链接、标题、正文、脚本、历史作品摘要或用户补充的作品上下文。
+- session.input.comments = 评论文本。
+- session.input.screenshotFileNames = 评论截图文件名，文件名只能作为辅助线索，不要假装已经读懂图片内容。
+
+任务模式：
+single_comment:
+- 只分析一条评论。
+- 如果用户贴了多条明显独立的评论，status 必须为 collecting，并让用户只保留一条，或切换到 comment_direction。
+- 输出重点是：评论真实意图、情绪阻力、隐藏需求、回复方向、是否能反推选题。
+
+comment_direction:
+- 分析一组评论的整体方向。
+- 不要逐条点评每条评论。
+- 输出重点是：反复出现的问题、最强情绪、内容机会、下一条内容方向、哪些回复可以置顶或优先回应。
+
+缺失处理：
+- workContext 为空时，status 必须为 collecting；assistantMessage 写“先选一条作品。”；nextQuestion 写“选一条作品或粘贴作品内容。”；output 不要做评论分析。
+- comments 为空且没有截图时，status 必须为 collecting；single_comment 只要求贴一条评论；comment_direction 要求贴几条代表性评论。
+- 用户写“不知道/没有/随便”时，不要追问抽象问题，给一个更具体的当前动作。
+
+输出规则：
+- output.assistantMode 必须等于本次任务模式。
+- output.workSummary 用一句话概括这条作品给评论分析提供的关键上下文。
+- output.analysis 必须包含可展示字段。
+- output.layers 最多 5 条。
+- output.replySuggestions 最多 3 条。
+- output.nextTopics 最多 5 条。
+- writebackCandidates 只能沉淀稳定的受众洞察、评论需求或风险，不要把单条评论直接写成长记忆。`;
   }
 
   if (module === "doctor") {
@@ -70,6 +218,144 @@ function asString(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function cloneDirectorSlots(): DirectorSlots {
+  return {
+    rootProblem: { ...EMPTY_DIRECTOR_SLOTS.rootProblem, missing: [...EMPTY_DIRECTOR_SLOTS.rootProblem.missing], evidence: [] },
+    changeTarget: { ...EMPTY_DIRECTOR_SLOTS.changeTarget, missing: [...EMPTY_DIRECTOR_SLOTS.changeTarget.missing], evidence: [] },
+    corePromise: { ...EMPTY_DIRECTOR_SLOTS.corePromise, missing: [...EMPTY_DIRECTOR_SLOTS.corePromise.missing], evidence: [] }
+  };
+}
+
+function getDirectorSlots(session: AgentSession): DirectorSlots {
+  return enforceDirectorLinearity(normalizeDirectorSlots(session.draft.directorSlots, cloneDirectorSlots()));
+}
+
+function normalizeDirectorSlots(value: unknown, fallback = cloneDirectorSlots()): DirectorSlots {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return DIRECTOR_SLOT_KEYS.reduce((slots, key) => {
+    slots[key] = normalizeDirectorSlot(record[key], fallback[key], key);
+    return slots;
+  }, {} as DirectorSlots);
+}
+
+function normalizeDirectorSlot(value: unknown, fallback: DirectorSlot, key: DirectorSlotKey): DirectorSlot {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const status = normalizeSlotStatus(record.status);
+  const valueText = asString(record.value, fallback.value);
+  const missing = normalizeStringArray(record.missing, fallback.missing);
+  const evidence = normalizeStringArray(record.evidence, fallback.evidence);
+  const confidence =
+    typeof record.confidence === "number"
+      ? Math.max(0, Math.min(1, record.confidence))
+      : fallback.confidence;
+  const guardedStatus = guardSlotStatus({
+    status,
+    value: valueText,
+    confidence,
+    missing,
+    evidence
+  });
+  const promotedStatus =
+    guardedStatus === "partial" && isSlotAnswerReady(key, valueText, valueText)
+      ? "ready"
+      : guardedStatus;
+
+  return {
+    status: promotedStatus,
+    value: valueText,
+    confidence,
+    missing: promotedStatus === "ready" ? [] : missing.length ? missing : defaultMissingForSlot(key),
+    evidence
+  };
+}
+
+function guardSlotStatus(slot: DirectorSlot): DirectorSlot["status"] {
+  const valueLength = slot.value.trim().length;
+  if (!valueLength) {
+    return "empty";
+  }
+
+  if (slot.status === "ready" && (valueLength < 16 || slot.confidence < 0.7 || slot.missing.length > 0)) {
+    return "partial";
+  }
+
+  if (slot.status === "empty" && valueLength >= 8) {
+    return "partial";
+  }
+
+  return slot.status;
+}
+
+function normalizeSlotStatus(value: unknown): DirectorSlot["status"] {
+  return value === "partial" || value === "ready" ? value : "empty";
+}
+
+function normalizeStringArray(value: unknown, fallback: string[] = []) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : fallback;
+}
+
+function defaultMissingForSlot(key: DirectorSlotKey) {
+  return {
+    rootProblem: ["这条内容要让哪类人停下来"],
+    changeTarget: ["看完后先让这个人做什么"],
+    corePromise: ["这条内容最后收在哪句话"]
+  }[key];
+}
+
+function normalizeDirectorSlotKey(value: unknown, slots: DirectorSlots): DirectorSlotKey | null {
+  void value;
+  return firstOpenDirectorSlot(slots);
+}
+
+function firstOpenDirectorSlot(slots: DirectorSlots): DirectorSlotKey | null {
+  return DIRECTOR_SLOT_KEYS.find((key) => slots[key].status !== "ready") ?? null;
+}
+
+function enforceDirectorLinearity(slots: DirectorSlots): DirectorSlots {
+  const nextSlots = normalizeDirectorSlots(slots);
+  const firstOpenIndex = DIRECTOR_SLOT_KEYS.findIndex((key) => nextSlots[key].status !== "ready");
+
+  if (firstOpenIndex < 0) {
+    return nextSlots;
+  }
+
+  for (let index = firstOpenIndex + 1; index < DIRECTOR_SLOT_KEYS.length; index += 1) {
+    const key = DIRECTOR_SLOT_KEYS[index];
+    nextSlots[key] = {
+      ...EMPTY_DIRECTOR_SLOTS[key],
+      missing: defaultMissingForSlot(key)
+    };
+  }
+
+  return nextSlots;
+}
+
+function normalizeSuggestions(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        .map((item) => item.trim())
+        .slice(0, 3)
+    : [];
+}
+
+function directorReadyCount(slots: DirectorSlots) {
+  return DIRECTOR_SLOT_KEYS.filter((key) => slots[key].status === "ready").length;
+}
+
+function directorAllReady(slots: DirectorSlots) {
+  return DIRECTOR_SLOT_KEYS.every((key) => slots[key].status === "ready");
+}
+
 function buildDirectorFallback(session: AgentSession): AgentRunResult {
   const idea = asString(session.input.idea, "围绕一个真实经历做一条内容。");
   const goal = (asString(session.input.goal, "connect") as DirectorGoal) || "connect";
@@ -79,27 +365,30 @@ function buildDirectorFallback(session: AgentSession): AgentRunResult {
   const revisionRequests = Array.isArray(session.input.revisionRequests)
     ? session.input.revisionRequests.filter((item): item is string => typeof item === "string")
     : [];
-  const questions =
-    mode === "graphic"
-      ? [
-          "这篇内容最想解决读者的哪个具体问题？",
-          "你手里最能证明这件事的细节是什么？",
-          "读者看完之后，你希望他先做哪一步？",
-          "这篇内容最不能写偏的地方是什么？"
-        ]
-      : [
-          "这条内容最想解决观众的哪个具体问题？",
-          "你手里最能证明这件事的细节是什么？",
-          "观众看完之后，你希望他先做哪一步？",
-          "这条内容最不能拍偏的地方是什么？"
-        ];
-
-  const nextQuestion = questions[session.answers.length];
-  const complete = revisionRequests.length > 0 || session.answers.length >= session.followupBudget || !nextQuestion;
-  const anchor = session.answers[0] || "先把最想让人记住的一句话抛出来";
-  const middle = session.answers[1] || "用真实经历承接，再给可执行方法";
-  const proof = session.answers[2] || "用一个具体细节证明你真的经历过";
-  const action = session.answers[3] || "引导观众把自己最卡的地方留在评论区";
+  const slots = applyFallbackAnswers(
+    session,
+    applyDirectorSlotRevision(getDirectorSlots(session), normalizeDirectorSlotRevision(session.input.slotRevision)),
+    idea,
+    mode
+  );
+  const nextSlot = normalizeDirectorSlotKey(session.draft.nextSlot, slots);
+  const optionVariant = session.answers.filter((answer) =>
+    ["unknown", "confused", "ask_options"].includes(classifyDirectorReply(answer))
+  ).length;
+  const suggestions = nextSlot && slots[nextSlot].status !== "ready"
+    ? fallbackSuggestions(nextSlot, idea, mode, optionVariant)
+    : [];
+  const nextQuestion = nextSlot ? fallbackQuestion(nextSlot, slots[nextSlot].status, idea, mode) : undefined;
+  const complete =
+    revisionRequests.length > 0 ||
+    directorAllReady(slots);
+  const rootProblem = slots.rootProblem.value || "用户真正卡住的是状态断掉后不知道怎么重新开始";
+  const changeTarget = slots.changeTarget.value || "让用户先恢复可执行的小节奏，而不是一上来逼自己加时长";
+  const coreConclusion = slots.corePromise.value || "先恢复节奏，再谈努力";
+  const anchor = coreConclusion;
+  const middle = `${rootProblem}。${changeTarget}`;
+  const proof = rootProblem;
+  const action = "引导用户说出自己最卡的具体步骤";
   const draft =
     mode === "graphic"
       ? {
@@ -148,14 +437,260 @@ function buildDirectorFallback(session: AgentSession): AgentRunResult {
     status: complete ? "completed" : "collecting",
     assistantMessage: complete
       ? revisionRequests.length
-        ? "我按你的要求改好了，下面这版可以继续调整。"
-        : "这一版已经可以直接拿去发布前再过一遍。"
-      : "我先补齐一个关键点，再继续整理草稿。",
+        ? "按新的要求更新这一版。"
+        : "检查标题、开头和结尾引导。"
+      : "选一个方向，或自己写。",
     nextQuestion: complete ? undefined : nextQuestion,
-    draft,
+    nextSlot: complete ? null : nextSlot,
+    suggestions: complete ? [] : suggestions,
+    slots,
+    draft: {
+      ...draft,
+      directorSlots: slots,
+      nextSlot: complete ? null : nextSlot,
+      suggestions: complete ? [] : suggestions,
+      directorAnswerCount: session.answers.length
+    },
     output: complete ? output : {},
     writebackCandidates: candidates
   };
+}
+
+function normalizeDirectorSlotRevision(value: unknown): { slotKey: DirectorSlotKey; value: string } | null {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const slotKey = record.slotKey;
+  const text = asString(record.value);
+
+  if (!text || (slotKey !== "rootProblem" && slotKey !== "changeTarget" && slotKey !== "corePromise")) {
+    return null;
+  }
+
+  return { slotKey, value: text };
+}
+
+function applyDirectorSlotRevision(
+  slots: DirectorSlots,
+  revision: { slotKey: DirectorSlotKey; value: string } | null
+): DirectorSlots {
+  if (!revision) {
+    return enforceDirectorLinearity(slots);
+  }
+
+  const nextSlots = normalizeDirectorSlots(slots);
+  const revisionIndex = DIRECTOR_SLOT_KEYS.indexOf(revision.slotKey);
+
+  DIRECTOR_SLOT_KEYS.forEach((key, index) => {
+    if (index < revisionIndex) {
+      return;
+    }
+
+    if (key === revision.slotKey) {
+      nextSlots[key] = {
+        status: "partial",
+        value: canonicalizeSlotValue(key, revision.value, nextSlots[key].value),
+        confidence: 0.58,
+        missing: defaultMissingForSlot(key),
+        evidence: [revision.value]
+      };
+      return;
+    }
+
+    nextSlots[key] = {
+      ...EMPTY_DIRECTOR_SLOTS[key],
+      missing: defaultMissingForSlot(key)
+    };
+  });
+
+  return enforceDirectorLinearity(nextSlots);
+}
+
+function applyFallbackAnswers(
+  session: AgentSession,
+  slots: DirectorSlots,
+  idea: string,
+  mode: ContentMode
+): DirectorSlots {
+  const previousAnswerCount =
+    typeof session.draft.directorAnswerCount === "number" ? session.draft.directorAnswerCount : 0;
+  const nextSlots = enforceDirectorLinearity(slots);
+  let currentSlot =
+    normalizeDirectorSlotKey(session.draft.nextSlot, nextSlots) ??
+    DIRECTOR_SLOT_KEYS.find((key) => nextSlots[key].status !== "ready") ??
+    "rootProblem";
+
+  for (const answer of session.answers.slice(previousAnswerCount)) {
+    const normalizedAnswer = answer.trim();
+    const replyType = classifyDirectorReply(normalizedAnswer);
+
+    if (replyType === "unknown" || replyType === "confused" || replyType === "ask_options") {
+      nextSlots[currentSlot] = {
+        ...nextSlots[currentSlot],
+        status: nextSlots[currentSlot].value ? "partial" : "empty",
+        missing: defaultMissingForSlot(currentSlot),
+        evidence: [...nextSlots[currentSlot].evidence, normalizedAnswer].filter(Boolean)
+      };
+      break;
+    }
+
+    const value = canonicalizeSlotValue(currentSlot, normalizedAnswer, nextSlots[currentSlot].value);
+    const ready = isSlotAnswerReady(currentSlot, value, normalizedAnswer);
+    nextSlots[currentSlot] = {
+      status: ready ? "ready" : "partial",
+      value,
+      confidence: ready ? 0.78 : 0.55,
+      missing: ready ? [] : defaultMissingForSlot(currentSlot),
+      evidence: [normalizedAnswer]
+    };
+
+    if (ready) {
+      currentSlot =
+        DIRECTOR_SLOT_KEYS.find((key) => nextSlots[key].status !== "ready") ??
+        currentSlot;
+    }
+  }
+
+  return enforceDirectorLinearity(nextSlots);
+}
+
+function classifyDirectorReply(answer: string) {
+  if (/^(不知道|不清楚|没想好|随便|你来定|没有|无)$/i.test(answer)) {
+    return "unknown";
+  }
+
+  if (/(没明白|没懂|什么意思|啥意思|不理解|看不懂)/.test(answer)) {
+    return "confused";
+  }
+
+  if (/(再.*选项|换.*选项|多.*选项|还有.*选|给.*选项|别的.*方向)/.test(answer)) {
+    return "ask_options";
+  }
+
+  if (/(不对|不是这个|重点不对|改成|应该是|我想改)/.test(answer)) {
+    return "revision";
+  }
+
+  return "answer";
+}
+
+function canonicalizeSlotValue(slot: DirectorSlotKey, answer: string, previous = "") {
+  const normalized = answer.replace(/^(改成|应该是|我想改成|不是，?|不对，?)/, "").trim();
+
+  if (slot === "changeTarget") {
+    if (/平静|冷静|稳住/.test(normalized)) {
+      return /一定可以|可以|能/.test(normalized)
+        ? "让他先平静下来，相信自己一定可以"
+        : "让他先平静下来";
+    }
+
+    if (/坐回|开始|动起来|行动|做/.test(normalized) && !/^让/.test(normalized)) {
+      return `让他${normalized}`;
+    }
+  }
+
+  if (slot === "rootProblem" && previous && normalized.length < 18) {
+    return `${previous}，${normalized}`;
+  }
+
+  return normalized;
+}
+
+function isSlotAnswerReady(slot: DirectorSlotKey, value: string, rawAnswer: string) {
+  const length = value.replace(/\s/g, "").length;
+
+  if (slot === "rootProblem") {
+    return length >= 16 && /(人|观众|读者|考研|二战|学生|上岸|成绩|书桌|学不进去|状态|怀疑)/.test(value);
+  }
+
+  if (slot === "changeTarget") {
+    return length >= 6 && /(让|先|停止|重新|平静|相信|开始|坐回|行动|选择|判断|不要|不再)/.test(value);
+  }
+
+  return rawAnswer.length >= 4;
+}
+
+function fallbackQuestion(
+  slot: DirectorSlotKey,
+  status: DirectorSlot["status"],
+  _idea: string,
+  mode: ContentMode
+) {
+  const audience = mode === "graphic" ? "读者" : "观众";
+  if (slot === "rootProblem") {
+    return status === "empty"
+      ? `这条内容更适合先让哪类${audience}停下来？`
+      : `再具体一点，这类${audience}最常卡在哪个场景？`;
+  }
+
+  if (slot === "changeTarget") {
+    return status === "empty"
+      ? `你想让这个${audience}看完后先做到什么？`
+      : `这个方向再落具体一点，最先发生的动作或念头是什么？`;
+  }
+
+  return status === "empty"
+    ? `这条内容最后想让${audience}记住哪句话？`
+    : `把这句话再收紧一点，最有力的版本是什么？`;
+}
+
+function linearFallbackQuestion(slot: DirectorSlotKey, status: DirectorSlot["status"]) {
+  if (slot === "rootProblem") {
+    return status === "empty"
+      ? "这条内容更适合先让哪类观众停下来？"
+      : "这类观众最典型的卡住画面是什么？";
+  }
+
+  if (slot === "changeTarget") {
+    return status === "empty"
+      ? "你想让这个观众看完后先做到什么？"
+      : "这个动作再具体一点，最先发生的变化是什么？";
+  }
+
+  return status === "empty"
+    ? "这条内容最后想让观众记住哪句话？"
+    : "把这句话再收紧一点，最有力的版本是什么？";
+}
+
+function fallbackSuggestions(slot: DirectorSlotKey, _idea: string, mode: ContentMode, variant = 0) {
+  const audience = mode === "graphic" ? "读者" : "观众";
+  if (slot === "rootProblem") {
+    const groups = [
+      [
+        `正在低谷里想重新开始的${audience}`,
+        `努力过但开始怀疑自己的${audience}`,
+        `看了方法却还是动不起来的${audience}`
+      ],
+      [
+        `坐到书桌前学不进去的${audience}`,
+        `决定重来但迟迟没开始的${audience}`,
+        `看到别人进度就慌的${audience}`
+      ],
+      [
+        `刚查完成绩很崩的${audience}`,
+        `已经摆烂几周的${audience}`,
+        `每天计划重启又失败的${audience}`
+      ]
+    ];
+    return groups[variant % groups.length];
+  }
+
+  if (slot === "changeTarget") {
+    const groups = [
+      ["先平静下来", "重新坐回书桌前", "停止拿自己和别人比"],
+      ["先完成一个小任务", "把任务拆到能开始", "不再用低效否定自己"],
+      ["先承认自己还想重来", "先把今天稳住", "先恢复每天打开书的动作"]
+    ];
+    return groups[variant % groups.length];
+  }
+
+  const groups = [
+    ["平静下来，我一定可以", "先坐回来，再谈效率", "能开始一点，就在恢复"],
+    ["不是你不行，是还没缓过来", "先稳住，再重新开始", "回来这一步已经很重要"],
+    ["别急着证明，先回来", "今天能开始，就不算输", "先把自己从慌里拉回来"]
+  ];
+  return groups[variant % groups.length];
 }
 
 function normalizeOutputSpec(value: unknown, mode: ContentMode) {
@@ -275,9 +810,45 @@ function buildGraphicOutput(params: {
   };
 }
 
+function normalizeAssistantMode(value: unknown) {
+  return value === "comment_direction" ? "comment_direction" : "single_comment";
+}
+
 function buildAssistantFallback(session: AgentSession): AgentRunResult {
-  const text = asString(session.input.comments, "能不能出一期在职考研如何切换工作和学习状态？");
-  const modeLabel = session.contentMode === "graphic" ? "图文评论" : "视频评论";
+  const assistantMode = normalizeAssistantMode(session.input.assistantMode);
+  const workContext = asString(session.input.workContext);
+  const comments = asString(session.input.comments);
+  const text = comments || "能不能出一期在职考研如何切换工作和学习状态？";
+  const sourceType = asString(
+    session.input.sourceType,
+    session.contentMode === "graphic" ? "图文作品" : "视频作品"
+  );
+  const screenshotFileNames = normalizeStringArray(session.input.screenshotFileNames).filter(
+    (name) => name !== "还没有选择文件"
+  );
+  const missingWork = !workContext;
+  const missingMaterial = !comments && !screenshotFileNames.length;
+
+  if (missingWork || missingMaterial) {
+    const nextQuestion = missingWork
+      ? "选一条作品或粘贴作品内容。"
+      : assistantMode === "single_comment"
+        ? "只贴一条评论。"
+        : "贴几条代表性评论。";
+
+    return {
+      status: "collecting",
+      assistantMessage: missingWork ? "先选一条作品。" : nextQuestion,
+      nextQuestion,
+      draft: {},
+      output: {
+        assistantMode,
+        assistantMessage: missingWork ? "先选一条作品。" : nextQuestion
+      },
+      writebackCandidates: []
+    };
+  }
+
   const candidate: MemoryCandidate = {
     category: "topic_opportunity",
     key: "comment_topic_request",
@@ -292,23 +863,55 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
 
   return {
     status: "completed",
-    assistantMessage: "评论已经分层，优先处理能延展为下一期内容的问题。",
+    assistantMessage:
+      assistantMode === "single_comment"
+        ? "这条评论可以延展成下一条内容。"
+        : "评论区已经指向下一条内容方向。",
     draft: {},
     output: {
+      assistantMode,
+      workSummary: `${sourceType} 的评论重点落在“状态切换”和“低焦虑执行”上。`,
+      analysis:
+        assistantMode === "single_comment"
+          ? {
+              commentIntent: "这条评论不是随口提问，而是在请求一个能马上照做的方法。",
+              audienceEmotion: "疲惫、焦虑，想重新开始但担心再次失败。",
+              hiddenNeed: "用户想知道下班后怎么进入学习状态，而不是再听自律口号。",
+              contentOpportunity: "可以延展成一条在职备考状态切换内容。",
+              replyDirection: "先接住处境，再承诺拆具体方法。",
+              nextContentDirection: "讲下班后 15 分钟内重新坐回书桌的动作。"
+            }
+          : {
+              sectionDirection: "评论区反复在问状态切换、时间管理和低焦虑执行。",
+              audienceEmotion: "大家不是不想学，而是被疲惫和失败感拖住。",
+              hiddenNeed: "用户需要一套下班后还能启动的小动作。",
+              contentOpportunity: "下一条内容可以专门回应在职备考如何重新进入状态。",
+              replyDirection: "优先回复最具体的问题，把它置顶成下一期入口。",
+              nextContentDirection: "做一条“下班后学不进去怎么办”的内容。"
+            },
       layers: [
         {
-          type: `${modeLabel} · 高价值评论`,
+          type: assistantMode === "single_comment" ? "高价值评论" : "高频方向",
           quote: text,
-          action: "优先回复，并进入下一期选题池。"
+          action:
+            assistantMode === "single_comment"
+              ? "优先回复，并进入下一期选题池。"
+              : "整理成下一条内容的主线。"
         }
       ],
       risks: [],
       commentStrategy: {
-        priority: "先回复能延展成选题的问题",
+        priority:
+          assistantMode === "single_comment"
+            ? "先回复能延展成选题的问题"
+            : "先抓反复出现的问题",
         replyGoal: "把真实问题接成下一期内容入口",
         tone: "先共情，再给一个明确承诺",
         avoid: ["不要只回复“下期安排”", "不要直接反驳负面评论"],
-        nextMove: "把高频问题整理成一条新内容"
+        nextMove:
+          assistantMode === "single_comment"
+            ? "把这条问题整理成一条新内容"
+            : "把评论区高频问题整理成一条新内容"
       },
       replySuggestions: [
         "你这个问题特别真实，我自己二战时最难的也不是学不会，而是每天都很难重新进入状态。后面我整理一套更适合在职备考的切换方法。"
@@ -395,23 +998,66 @@ function buildProfileFallback(session: AgentSession, profile: CreatorProfile): A
 }
 
 export function normalizeRunResult(value: Record<string, unknown>, fallback: AgentRunResult): AgentRunResult {
+  const fallbackSlots = fallback.slots ?? normalizeDirectorSlots(fallback.draft.directorSlots);
+  const rawDraft =
+    typeof value.draft === "object" && value.draft
+      ? (value.draft as Record<string, unknown>)
+      : {};
+  const hasDirectorSlots = Boolean(value.slots || rawDraft.directorSlots || fallback.slots || fallback.draft.directorSlots);
+  const slots = hasDirectorSlots
+    ? enforceDirectorLinearity(normalizeDirectorSlots(value.slots ?? rawDraft.directorSlots, fallbackSlots))
+    : undefined;
+  const rawNextSlot = value.nextSlot ?? rawDraft.nextSlot;
+  const nextSlot = slots ? normalizeDirectorSlotKey(rawNextSlot, slots) : undefined;
+  const rawSuggestions = normalizeSuggestions(value.suggestions ?? rawDraft.suggestions);
+  const rawNextSlotMatches =
+    rawNextSlot === nextSlot || (!rawNextSlot && nextSlot === fallback.nextSlot);
+  const suggestions =
+    nextSlot && slots?.[nextSlot]?.status !== "ready"
+      ? rawNextSlotMatches && rawSuggestions.length
+        ? rawSuggestions
+        : fallbackSuggestions(nextSlot, "", "video")
+      : [];
   const draft =
     typeof value.draft === "object" && value.draft
-      ? mergeDraft(value.draft as Record<string, unknown>, fallback.draft)
+      ? mergeDraft(rawDraft, fallback.draft)
       : fallback.draft;
+  const output =
+    typeof value.output === "object" && value.output
+      ? { ...fallback.output, ...(value.output as Record<string, unknown>) }
+      : fallback.output;
+  const status =
+    value.status === "collecting" || value.status === "ready" || value.status === "completed"
+      ? value.status
+      : fallback.status;
+  const guardedStatus =
+    slots && status === "completed" && !directorAllReady(slots)
+      ? "collecting"
+      : status;
+  const assistantMessage = asString(value.assistantMessage, fallback.assistantMessage);
+  const nextQuestion =
+    guardedStatus === "collecting" && nextSlot
+      ? rawNextSlotMatches
+        ? asString(value.nextQuestion, linearFallbackQuestion(nextSlot, slots?.[nextSlot]?.status ?? "empty"))
+        : linearFallbackQuestion(nextSlot, slots?.[nextSlot]?.status ?? "empty")
+      : undefined;
 
   return {
-    status:
-      value.status === "collecting" || value.status === "ready" || value.status === "completed"
-        ? value.status
-        : fallback.status,
-    assistantMessage: asString(value.assistantMessage, fallback.assistantMessage),
-    nextQuestion: asString(value.nextQuestion, fallback.nextQuestion),
-    draft,
-    output:
-      typeof value.output === "object" && value.output
-        ? { ...fallback.output, ...(value.output as Record<string, unknown>) }
-        : fallback.output,
+    status: guardedStatus,
+    assistantMessage,
+    nextQuestion,
+    nextSlot: nextSlot ?? fallback.nextSlot,
+    suggestions: suggestions.length ? suggestions : fallback.suggestions,
+    slots: slots ?? fallback.slots,
+    draft: slots
+      ? {
+          ...draft,
+          directorSlots: slots,
+          nextSlot: nextSlot ?? null,
+          suggestions: suggestions.length ? suggestions : fallback.suggestions ?? []
+        }
+      : draft,
+    output,
     writebackCandidates: normalizeMemoryCandidates(value.writebackCandidates, fallback.writebackCandidates)
   };
 }

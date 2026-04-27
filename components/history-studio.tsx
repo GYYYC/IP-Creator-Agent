@@ -18,19 +18,92 @@ function formatDate(value: string) {
   });
 }
 
+async function deleteHistoryEntries(sessionIds: string[]) {
+  const response = await fetch("/api/history/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionIds })
+  });
+  const payload = (await response.json()) as {
+    ok: boolean;
+    data?: { deletedIds: string[] };
+    error?: string;
+  };
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || "删除失败，请稍后再试。");
+  }
+
+  return payload.data?.deletedIds ?? [];
+}
+
 export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
+  const [items, setItems] = useState(entries);
   const [activeModule, setActiveModule] = useState<HistoryEntry["module"] | "all">("all");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const filters = useMemo(
     () => [
-      { key: "all" as const, label: "全部", count: entries.length },
-      { key: "director" as const, label: "脚本创作", count: entries.filter((entry) => entry.module === "director").length },
-      { key: "doctor" as const, label: "内容复盘", count: entries.filter((entry) => entry.module === "doctor").length },
-      { key: "assistant" as const, label: "评论处理", count: entries.filter((entry) => entry.module === "assistant").length }
+      { key: "all" as const, label: "全部", count: items.length },
+      { key: "director" as const, label: "脚本创作", count: items.filter((entry) => entry.module === "director").length },
+      { key: "doctor" as const, label: "内容复盘", count: items.filter((entry) => entry.module === "doctor").length },
+      { key: "assistant" as const, label: "评论处理", count: items.filter((entry) => entry.module === "assistant").length }
     ],
-    [entries]
+    [items]
   );
   const visibleEntries =
-    activeModule === "all" ? entries : entries.filter((entry) => entry.module === activeModule);
+    activeModule === "all" ? items : items.filter((entry) => entry.module === activeModule);
+  const selectedVisibleCount = visibleEntries.filter((entry) => selectedIdSet.has(entry.id)).length;
+
+  function toggleSelected(id: string) {
+    setNotice("");
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  }
+
+  function selectVisibleEntries() {
+    setNotice("");
+    const visibleIds = visibleEntries.map((entry) => entry.id);
+    setSelectedIds((current) => Array.from(new Set([...current, ...visibleIds])));
+  }
+
+  function clearSelection() {
+    setNotice("");
+    setSelectedIds([]);
+  }
+
+  async function handleDeleteSelected() {
+    if (!selectedIds.length || isDeleting) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `删除选中的 ${selectedIds.length} 条记录？相关附件和保存内容也会一起移除。`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setNotice("");
+
+    try {
+      const deletedIds = await deleteHistoryEntries(selectedIds);
+      const deletedIdSet = new Set(deletedIds);
+
+      setItems((current) => current.filter((entry) => !deletedIdSet.has(entry.id)));
+      setSelectedIds((current) => current.filter((id) => !deletedIdSet.has(id)));
+      setNotice(deletedIds.length ? `已删除 ${deletedIds.length} 条记录。` : "没有找到可删除的记录。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除失败，请稍后再试。");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
 
   return (
     <>
@@ -47,6 +120,37 @@ export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
           </button>
         ))}
       </section>
+
+      {items.length ? (
+        <section className="history-selection-bar" aria-live="polite">
+          <div>
+            <strong>{selectedIds.length ? `已选 ${selectedIds.length} 条` : "选择记录"}</strong>
+            {notice ? <span>{notice}</span> : null}
+          </div>
+          <div className="history-selection-actions">
+            {visibleEntries.length && selectedVisibleCount < visibleEntries.length ? (
+              <button className="button-secondary" onClick={selectVisibleEntries} type="button">
+                选中当前列表
+              </button>
+            ) : null}
+            {selectedIds.length ? (
+              <>
+                <button className="button-secondary" onClick={clearSelection} type="button">
+                  取消选择
+                </button>
+                <button
+                  className="button-danger"
+                  disabled={isDeleting}
+                  onClick={handleDeleteSelected}
+                  type="button"
+                >
+                  {isDeleting ? "删除中" : "删除选中"}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {!visibleEntries.length ? (
         <section className="surface-card glass history-empty">
@@ -68,8 +172,21 @@ export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
       ) : (
         <section className="history-list">
           {visibleEntries.map((entry) => (
-            <article className={`surface-card glass history-card ${entry.module}`} key={entry.id}>
+            <article
+              className={`surface-card glass history-card ${entry.module} ${
+                selectedIdSet.has(entry.id) ? "selected" : ""
+              }`}
+              key={entry.id}
+            >
               <div className="history-card-head">
+                <button
+                  aria-pressed={selectedIdSet.has(entry.id)}
+                  className="history-select-control"
+                  onClick={() => toggleSelected(entry.id)}
+                  type="button"
+                >
+                  <span>{selectedIdSet.has(entry.id) ? "已选" : "选择"}</span>
+                </button>
                 <div>
                   <span className="label">{entry.moduleLabel}</span>
                   <h3>{entry.title}</h3>

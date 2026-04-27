@@ -24,28 +24,46 @@ export async function POST(
     return jsonError("Session not found.", 404);
   }
 
+  const targetSlot = normalizeDirectorSlotKey(body.targetSlot);
+  const isSlotRevision = body.kind === "slot_revision" && session.module === "director" && targetSlot;
   const isRevision =
-    body.kind === "revision" ||
-    session.status === "completed" ||
-    session.answers.length >= session.followupBudget;
+    !isSlotRevision &&
+    (body.kind === "revision" ||
+    session.status === "completed");
   const revisionRequests = Array.isArray(session.input.revisionRequests)
     ? session.input.revisionRequests.filter((item): item is string => typeof item === "string")
     : [];
+  const inputWithoutSlotRevision = { ...session.input };
+  delete inputWithoutSlotRevision.slotRevision;
 
   const nextSession = await upsertSession({
     ...session,
-    answers: isRevision
+    answers: isRevision || isSlotRevision
       ? session.answers
-      : [...session.answers, answer].slice(0, session.followupBudget),
-    input: isRevision
+      : [...session.answers, answer],
+    input: isSlotRevision
       ? {
-          ...session.input,
-          revisionRequests: [...revisionRequests, answer].slice(-8)
+          ...inputWithoutSlotRevision,
+          slotRevision: {
+            slotKey: targetSlot,
+            value: answer
+          }
         }
-      : session.input,
+      : isRevision
+      ? {
+          ...inputWithoutSlotRevision,
+          revisionRequests: [...revisionRequests, answer]
+        }
+      : inputWithoutSlotRevision,
     status: isRevision ? "completed" : "collecting",
     updatedAt: new Date().toISOString()
   });
 
   return jsonOk({ session: nextSession });
+}
+
+function normalizeDirectorSlotKey(value: unknown) {
+  return value === "rootProblem" || value === "changeTarget" || value === "corePromise"
+    ? value
+    : null;
 }

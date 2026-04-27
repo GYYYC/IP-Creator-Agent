@@ -196,6 +196,46 @@ async function insertDatabaseMemory(memory: BrainMemoryEntry) {
   return memory;
 }
 
+async function deleteDatabaseSessions(sessionIds: string[], profileId: string) {
+  await ensureDatabase();
+  const client = await getPool().connect();
+
+  try {
+    await client.query("begin");
+    const existing = await client.query<{ id: string; data: AgentSession }>(
+      "select id, data from agent_sessions where profile_id = $1 and id = any($2::text[])",
+      [profileId, sessionIds]
+    );
+    const deletedIds = existing.rows.map((row) => row.id);
+    const deletedArtifactIds = existing.rows.flatMap((row) => row.data.artifactIds ?? []);
+
+    if (deletedIds.length) {
+      await client.query(
+        `delete from agent_artifacts
+         where profile_id = $1
+         and (session_id = any($2::text[]) or id = any($3::text[]))`,
+        [profileId, deletedIds, deletedArtifactIds]
+      );
+      await client.query(
+        "delete from agent_memories where profile_id = $1 and data->>'sourceSessionId' = any($2::text[])",
+        [profileId, deletedIds]
+      );
+      await client.query(
+        "delete from agent_sessions where profile_id = $1 and id = any($2::text[])",
+        [profileId, deletedIds]
+      );
+    }
+
+    await client.query("commit");
+    return { deletedIds };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function mutateStore<T>(
   mutator: (store: AgentStoreShape) => T | Promise<T>
 ): Promise<T> {
@@ -272,5 +312,42 @@ export async function insertMemory(memory: BrainMemoryEntry) {
   return mutateStore((store) => {
     store.memories.push(memory);
     return memory;
+  });
+}
+
+export async function deleteSessions(sessionIds: string[], profileId: string) {
+  const ids = Array.from(new Set(sessionIds.map((id) => id.trim()).filter(Boolean)));
+
+  if (!ids.length) {
+    return { deletedIds: [] };
+  }
+
+  if (useDatabase()) {
+    return deleteDatabaseSessions(ids, profileId);
+  }
+
+  return mutateStore((store) => {
+    const deletedSessions = store.sessions.filter(
+      (session) => session.profileId === profileId && ids.includes(session.id)
+    );
+    const deletedIds = deletedSessions.map((session) => session.id);
+
+    if (!deletedIds.length) {
+      return { deletedIds };
+    }
+
+    const deletedIdSet = new Set(deletedIds);
+    const deletedArtifactIds = new Set(deletedSessions.flatMap((session) => session.artifactIds));
+    store.sessions = store.sessions.filter((session) => !deletedIdSet.has(session.id));
+    store.artifacts = store.artifacts.filter(
+      (artifact) =>
+        artifact.profileId !== profileId ||
+        (!deletedArtifactIds.has(artifact.id) && (!artifact.sessionId || !deletedIdSet.has(artifact.sessionId)))
+    );
+    store.memories = store.memories.filter(
+      (memory) => memory.profileId !== profileId || !memory.sourceSessionId || !deletedIdSet.has(memory.sourceSessionId)
+    );
+
+    return { deletedIds };
   });
 }

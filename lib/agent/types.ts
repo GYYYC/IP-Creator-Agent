@@ -19,6 +19,18 @@ export type MemoryCategory =
   | "topic_opportunity"
   | "risk";
 export type WritePolicy = "user_confirmed" | "repeated_signal" | "candidate_only";
+export type DirectorSlotKey = "rootProblem" | "changeTarget" | "corePromise";
+export type DirectorSlotStatus = "empty" | "partial" | "ready";
+
+export type DirectorSlot = {
+  status: DirectorSlotStatus;
+  value: string;
+  confidence: number;
+  missing: string[];
+  evidence: string[];
+};
+
+export type DirectorSlots = Record<DirectorSlotKey, DirectorSlot>;
 
 export type CreatorProfile = {
   id: string;
@@ -105,6 +117,9 @@ export type AgentRunResult = {
   status: SessionStatus;
   assistantMessage: string;
   nextQuestion?: string;
+  nextSlot?: DirectorSlotKey | null;
+  suggestions?: string[];
+  slots?: DirectorSlots;
   draft: Record<string, unknown>;
   output: Record<string, unknown>;
   writebackCandidates: MemoryCandidate[];

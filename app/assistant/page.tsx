@@ -19,8 +19,8 @@ export default async function AssistantPage({ searchParams }: PageProps) {
       <div className="container">
         <PageIntro
           label="评论助手"
-          title="先把评论区里最值得处理的内容拎出来"
-          description="把评论贴进来，先挑出最值得回复和置顶的内容。"
+          title="从作品里看懂评论"
+          description="先选作品，再拆单条评论或评论区方向。"
         />
 
         <AssistantStudio initialSessionId={getSessionId(params)} />
