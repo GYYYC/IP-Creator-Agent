@@ -22,6 +22,9 @@ const storeDirectory =
 const storePath = path.join(storeDirectory, "agent-store.json");
 const databaseUrl =
   process.env.DATABASE_URL ||
+  process.env.DATABASE_POSTGRES_URL ||
+  process.env.DATABASE_POSTGRES_PRISMA_URL ||
+  process.env.DATABASE_POSTGRES_URL_NON_POOLING ||
   process.env.POSTGRES_URL ||
   process.env.POSTGRES_PRISMA_URL ||
   process.env.POSTGRES_URL_NON_POOLING ||

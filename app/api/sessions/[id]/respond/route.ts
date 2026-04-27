@@ -8,7 +8,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const profile = await getOrCreateProfile();
+  await getOrCreateProfile();
   const { id } = await context.params;
   const body = await readJson(request);
   const answer = typeof body.answer === "string" ? body.answer.trim() : "";
@@ -18,9 +18,7 @@ export async function POST(
   }
 
   const store = await getStore();
-  const session = store.sessions.find(
-    (item) => item.id === id && item.profileId === profile.id
-  );
+  const session = store.sessions.find((item) => item.id === id);
 
   if (!session) {
     return jsonError("Session not found.", 404);

@@ -9,17 +9,16 @@ export async function POST(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const profile = await getOrCreateProfile();
+  const currentProfile = await getOrCreateProfile();
   const { id } = await context.params;
   const store = await getStore();
-  const session = store.sessions.find(
-    (item) => item.id === id && item.profileId === profile.id
-  );
+  const session = store.sessions.find((item) => item.id === id);
 
   if (!session) {
     return jsonError("Session not found.", 404);
   }
 
+  const profile = store.profiles.find((item) => item.id === session.profileId) ?? currentProfile;
   const entries = await applyMemoryCandidates({
     profile,
     module: session.module,
