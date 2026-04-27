@@ -152,13 +152,38 @@ The app is centered around four persisted record types:
 - `AgentSession`: one Director, Doctor, Assistant, or Profile run.
 - `ArtifactRecord`: uploaded or referenced file metadata.
 
-The local store is file-backed JSON. By default it writes to:
+The store supports two modes:
+
+- **Postgres mode**: used automatically when `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, or `POSTGRES_URL_NON_POOLING` is present.
+- **Local JSON fallback**: used when no database connection string is configured.
+
+In Postgres mode, the app automatically creates these tables on first use:
+
+- `agent_profiles`
+- `agent_memories`
+- `agent_sessions`
+- `agent_artifacts`
+
+For local development without a database, the JSON fallback writes to:
 
 ```text
 .data/agent-store.json
 ```
 
-On Vercel, it falls back to `/tmp/ip-creator-agent` unless `AGENT_STORE_DIR` is configured. For production use, replace this file store with a durable database.
+On Vercel, a database is required for reliable sessions and history. Serverless functions do not share local files reliably across requests, so the JSON fallback is only suitable for local demos.
+
+### Vercel Database Setup
+
+The recommended production path is a Postgres database from Vercel Marketplace, such as Neon or Supabase. Vercel Marketplace storage integrations can inject database credentials into the project environment automatically.
+
+1. Open the Vercel project dashboard.
+2. Go to **Storage** or **Marketplace**.
+3. Add a Postgres provider, such as **Neon** or **Supabase**.
+4. Connect it to this project.
+5. Confirm that Vercel added a connection string such as `DATABASE_URL` or `POSTGRES_URL` under **Settings -> Environment Variables**.
+6. Redeploy the project.
+
+After redeploying, Director sessions, follow-up answers, profile memory, artifacts, and history entries will be stored in Postgres instead of temporary local files.
 
 ## AI Provider Configuration
 
@@ -185,6 +210,10 @@ Available environment variables:
 | `ANTHROPIC_AUTH_TOKEN` | Anthropic-compatible API key. |
 | `ANTHROPIC_MODEL` | Anthropic-compatible model name. |
 | `AI_REQUEST_TIMEOUT_MS` | Request timeout in milliseconds. |
+| `DATABASE_URL` | Preferred Postgres connection string for production persistence. |
+| `POSTGRES_URL` | Alternate Postgres connection string injected by some Vercel integrations. |
+| `POSTGRES_PRISMA_URL` | Alternate pooled Postgres connection string. |
+| `POSTGRES_URL_NON_POOLING` | Alternate non-pooled Postgres connection string. |
 | `AGENT_STORE_DIR` | Optional directory for the JSON data store. |
 | `BLOB_READ_WRITE_TOKEN` | Optional Vercel Blob token for future client-side uploads. |
 
