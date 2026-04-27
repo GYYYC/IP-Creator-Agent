@@ -1483,6 +1483,188 @@ svg {
   background: var(--secondary);
 }
 
+html[data-theme="light"] body {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(0, 108, 255, 0.14), transparent 30%),
+    radial-gradient(circle at 86% 12%, rgba(102, 116, 134, 0.16), transparent 30%),
+    linear-gradient(135deg, #eef2f6 0%, #d7dde5 48%, #c4ccd6 100%);
+}
+
+html[data-theme="light"] body::before {
+  background-image:
+    linear-gradient(rgba(25, 32, 41, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 32, 41, 0.045) 1px, transparent 1px);
+}
+
+html[data-theme="light"] body::after {
+  background:
+    conic-gradient(from 120deg at 72% 36%, transparent 0deg, rgba(0, 108, 255, 0.09) 42deg, transparent 92deg),
+    linear-gradient(120deg, transparent 0 54%, rgba(17, 24, 39, 0.055) 54% 56%, transparent 56% 100%);
+}
+
+html[data-theme="light"] .glass,
+html[data-theme="light"] .surface-card,
+html[data-theme="light"] .panel,
+html[data-theme="light"] .overlay-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(230, 236, 244, 0.7)),
+    var(--panel);
+  border-color: rgba(17, 24, 39, 0.12);
+  box-shadow: 0 22px 58px rgba(17, 24, 39, 0.12);
+}
+
+html[data-theme="light"] .app-sidebar {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(0, 108, 255, 0.14), transparent 36%),
+    linear-gradient(180deg, rgba(244, 247, 250, 0.98), rgba(214, 222, 232, 0.96));
+  border-right-color: rgba(17, 24, 39, 0.12);
+  box-shadow: 18px 0 50px rgba(17, 24, 39, 0.08);
+}
+
+html[data-theme="light"] .app-brand,
+html[data-theme="light"] .app-brand-copy strong,
+html[data-theme="light"] .app-nav-link {
+  color: #11151b;
+}
+
+html[data-theme="light"] .app-brand-copy span,
+html[data-theme="light"] .label,
+html[data-theme="light"] .tag,
+html[data-theme="light"] .status-badge {
+  background: rgba(0, 108, 255, 0.1);
+  color: #0058d6;
+  border-color: rgba(0, 108, 255, 0.22);
+}
+
+html[data-theme="light"] .app-nav-link:hover,
+html[data-theme="light"] .app-nav-link:focus-visible,
+html[data-theme="light"] .app-nav-link.active {
+  background: linear-gradient(90deg, rgba(0, 108, 255, 0.18), rgba(255, 255, 255, 0.48));
+  color: #07111f;
+  box-shadow: inset 3px 0 0 var(--primary), 0 14px 30px rgba(0, 108, 255, 0.12);
+}
+
+html[data-theme="light"] .sidebar-priority-card {
+  background:
+    radial-gradient(circle at 85% 18%, rgba(0, 108, 255, 0.16), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(213, 222, 233, 0.76));
+  border-color: rgba(0, 108, 255, 0.22);
+}
+
+html[data-theme="light"] .sidebar-priority-card strong {
+  color: #11151b;
+}
+
+html[data-theme="light"] .sidebar-priority-card a,
+html[data-theme="light"] .search-command,
+html[data-theme="light"] .assistant-state,
+html[data-theme="light"] .button-secondary,
+html[data-theme="light"] .profile-entry,
+html[data-theme="light"] .theme-toggle,
+html[data-theme="light"] .memory-toggle {
+  background: rgba(244, 247, 250, 0.86);
+  color: #11151b;
+  border-color: rgba(17, 24, 39, 0.12);
+}
+
+html[data-theme="light"] .app-topbar {
+  background: linear-gradient(180deg, rgba(230, 236, 244, 0.94), rgba(230, 236, 244, 0.72), transparent);
+}
+
+html[data-theme="light"] .search-command kbd {
+  background: rgba(17, 24, 39, 0.06);
+  border-color: rgba(17, 24, 39, 0.1);
+  color: #303844;
+}
+
+html[data-theme="light"] .dashboard-kpis,
+html[data-theme="light"] .feature-card,
+html[data-theme="light"] .record-card,
+html[data-theme="light"] .record-add,
+html[data-theme="light"] .radar-card,
+html[data-theme="light"] .metric-card,
+html[data-theme="light"] .director-stat,
+html[data-theme="light"] .compact-stat,
+html[data-theme="light"] .upload-card,
+html[data-theme="light"] .preview-card,
+html[data-theme="light"] .director-hook-card,
+html[data-theme="light"] .callout,
+html[data-theme="light"] .script-block,
+html[data-theme="light"] .script-timeline-item {
+  background:
+    radial-gradient(circle at 78% 12%, rgba(0, 108, 255, 0.1), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(221, 229, 239, 0.78));
+  border-color: rgba(17, 24, 39, 0.12);
+}
+
+html[data-theme="light"] .feature-card::after {
+  background: rgba(0, 108, 255, 0.12);
+}
+
+html[data-theme="light"] .feature-card-preview {
+  background: rgba(233, 239, 247, 0.78);
+  border-color: rgba(17, 24, 39, 0.1);
+}
+
+html[data-theme="light"] .feature-card-preview span,
+html[data-theme="light"] .record-card strong,
+html[data-theme="light"] .record-add strong,
+html[data-theme="light"] .profile-tags span,
+html[data-theme="light"] .mode-chip,
+html[data-theme="light"] .radar-copy strong {
+  color: #11151b;
+}
+
+html[data-theme="light"] .dashboard-card-icon,
+html[data-theme="light"] .record-card span,
+html[data-theme="light"] .section-line-head a,
+html[data-theme="light"] .history-filter strong {
+  color: #006cff;
+}
+
+html[data-theme="light"] .profile-tags span,
+html[data-theme="light"] .mode-chip {
+  background: rgba(0, 108, 255, 0.09);
+  border-color: rgba(0, 108, 255, 0.18);
+}
+
+html[data-theme="light"] .profile-orb {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.62), transparent 14%),
+    radial-gradient(circle at 50% 42%, rgba(0, 108, 255, 0.36), transparent 34%),
+    linear-gradient(145deg, rgba(171, 184, 201, 0.56), rgba(68, 78, 92, 0.88));
+  box-shadow: 0 18px 42px rgba(0, 108, 255, 0.15);
+}
+
+html[data-theme="light"] .input-group input,
+html[data-theme="light"] .input-group textarea,
+html[data-theme="light"] .input-group select {
+  background: rgba(255, 255, 255, 0.74);
+  color: #11151b;
+  border-color: rgba(17, 24, 39, 0.14);
+}
+
+html[data-theme="light"] .thread-bubble.assistant {
+  background: rgba(0, 108, 255, 0.09);
+}
+
+html[data-theme="light"] .thread-bubble.user {
+  background: rgba(17, 24, 39, 0.06);
+}
+
+html[data-theme="light"] .history-filter {
+  background: rgba(244, 247, 250, 0.82);
+  color: #303844;
+  border-color: rgba(17, 24, 39, 0.12);
+}
+
+html[data-theme="light"] .history-filter.active,
+html[data-theme="light"] .history-filter:hover,
+html[data-theme="light"] .history-filter:focus-visible {
+  background: rgba(0, 108, 255, 0.12);
+  color: #11151b;
+}
+
 .footer {
   margin-left: var(--sidebar-width);
   padding: 14px 32px 28px;

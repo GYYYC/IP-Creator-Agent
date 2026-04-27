@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { onboardingFlow } from "@/lib/demo-data";
 
 const STORAGE_KEY = "ip-creator-onboarding-dismissed";
@@ -25,11 +24,38 @@ async function patchProfile(body: Record<string, unknown>) {
   }
 }
 
+async function registerHistoryWork(file: File) {
+  const response = await fetch("/api/artifacts/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kind: "history_work",
+      mimeType: file.type || "application/octet-stream",
+      fileName: file.name,
+      sizeBytes: file.size
+    })
+  });
+  const payload = (await response.json()) as ApiResponse<unknown>;
+
+  if (!payload.ok) {
+    throw new Error(payload.error);
+  }
+}
+
+function fileNames(files: File[]) {
+  if (!files.length) {
+    return [];
+  }
+
+  return files.map((file) => file.name);
+}
+
 export function OnboardingOverlay() {
   const [visible, setVisible] = useState(false);
   const [started, setStarted] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<Record<string, string>>(EMPTY_VALUES);
+  const [historyFiles, setHistoryFiles] = useState<File[]>([]);
 
   useEffect(() => {
     const dismissed = window.localStorage.getItem(STORAGE_KEY);
@@ -65,10 +91,15 @@ export function OnboardingOverlay() {
           reference: values.reference
         }
       });
+      await Promise.all(historyFiles.map(registerHistoryWork));
     } catch {
       // Keep entry smooth; profile details can be completed later.
     }
     closeOverlay();
+  }
+
+  function handleHistoryFiles(event: ChangeEvent<HTMLInputElement>) {
+    setHistoryFiles(Array.from(event.target.files ?? []));
   }
 
   if (!visible) {
@@ -84,8 +115,8 @@ export function OnboardingOverlay() {
             <div className="overlay-header">
               <div>
                 <span className="label">首次进入</span>
-                <h2>先把你的起点告诉我，再开始工作</h2>
-                <p>这一轮只会先确认你是谁、你在帮谁、你更适合怎么表达。</p>
+                <h2>先让我认识你一点点</h2>
+                <p>告诉我你想被谁记住、想陪谁往前走，我会把后面的脚本、复盘和回复写得更像你。</p>
               </div>
               <button className="button-secondary" onClick={closeOverlay} type="button">
                 稍后再说
@@ -117,7 +148,7 @@ export function OnboardingOverlay() {
                   <div className="action-row">
                     <div>
                       <strong>现在填写</strong>
-                      <div>先把最关键的信息补齐，后面使用会更顺。</div>
+                      <div>Agent 更懂你的意思。</div>
                     </div>
                   </div>
                   <div className="action-row">
@@ -139,9 +170,6 @@ export function OnboardingOverlay() {
                   稍后再说
                 </button>
               </div>
-              <Link className="button-ghost" href="/profile" onClick={closeOverlay}>
-                直接去个人画像
-              </Link>
             </div>
           </div>
         ) : (
@@ -189,10 +217,31 @@ export function OnboardingOverlay() {
                     />
                   </div>
                 ))}
+
+                {stepIndex === onboardingFlow.length - 1 ? (
+                  <label className="upload-card profile-upload-card onboarding-history-upload">
+                    <strong>也可以放几条之前的作品</strong>
+                    <span>选填。图文截图、视频、文案文档都可以，后面会用来判断你的稳定风格。</span>
+                    <input
+                      accept="image/*,video/*,.txt,.md,.pdf"
+                      className="file-input"
+                      multiple
+                      onChange={handleHistoryFiles}
+                      type="file"
+                    />
+                    {historyFiles.length ? (
+                      <div className="selected-files">
+                        {fileNames(historyFiles).map((name) => (
+                          <span key={name}>{name}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </label>
+                ) : null}
               </div>
 
               <aside className="surface-card glass onboarding-side-card">
-                <span className="label">填完这一页后</span>
+                <span className="label">我会先记住</span>
                 <div className="action-bullets">
                   {step.preview.map((item) => (
                     <div className="bullet-row" key={item}>
@@ -232,10 +281,6 @@ export function OnboardingOverlay() {
                   </button>
                 )}
               </div>
-
-              <Link className="button-ghost" href="/profile" onClick={closeOverlay}>
-                去个人画像继续填写
-              </Link>
             </div>
           </div>
         )}
