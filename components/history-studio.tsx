@@ -37,6 +37,19 @@ async function deleteHistoryEntries(sessionIds: string[]) {
   return payload.data?.deletedIds ?? [];
 }
 
+function visibleArtifacts(artifacts: HistoryEntry["artifacts"]) {
+  const frameArtifacts = artifacts.filter((artifact) => /frame\.jpg$/i.test(artifact.fileName));
+  const regularArtifacts = artifacts.filter((artifact) => !/frame\.jpg$/i.test(artifact.fileName));
+  const visible = regularArtifacts.slice(0, 3);
+  const hiddenRegularCount = Math.max(0, regularArtifacts.length - visible.length);
+
+  return {
+    frameCount: frameArtifacts.length,
+    hiddenRegularCount,
+    visible
+  };
+}
+
 export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
   const [items, setItems] = useState(entries);
   const [activeModule, setActiveModule] = useState<HistoryEntry["module"] | "all">("all");
@@ -171,13 +184,16 @@ export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
         </section>
       ) : (
         <section className="history-list">
-          {visibleEntries.map((entry) => (
-            <article
-              className={`surface-card glass history-card ${entry.module} ${
-                selectedIdSet.has(entry.id) ? "selected" : ""
-              }`}
-              key={entry.id}
-            >
+          {visibleEntries.map((entry) => {
+            const artifactPreview = visibleArtifacts(entry.artifacts);
+
+            return (
+              <article
+                className={`surface-card glass history-card ${entry.module} ${
+                  selectedIdSet.has(entry.id) ? "selected" : ""
+                }`}
+                key={entry.id}
+              >
               <div className="history-card-head">
                 <button
                   aria-pressed={selectedIdSet.has(entry.id)}
@@ -212,9 +228,15 @@ export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
 
               {entry.artifacts.length ? (
                 <div className="selected-files">
-                  {entry.artifacts.map((artifact) => (
+                  {artifactPreview.visible.map((artifact) => (
                     <span key={artifact.id}>{artifact.fileName}</span>
                   ))}
+                  {artifactPreview.frameCount ? (
+                    <span>关键帧 {artifactPreview.frameCount} 张</span>
+                  ) : null}
+                  {artifactPreview.hiddenRegularCount ? (
+                    <span>还有 {artifactPreview.hiddenRegularCount} 个素材</span>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -224,7 +246,8 @@ export function HistoryStudio({ entries }: { entries: HistoryEntry[] }) {
                 </Link>
               </div>
             </article>
-          ))}
+            );
+          })}
         </section>
       )}
     </>
