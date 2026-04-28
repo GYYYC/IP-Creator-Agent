@@ -1,4 +1,9 @@
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import {
+  createMultipartUpload,
+  generateClientTokenFromReadWriteToken,
+  handleUpload,
+  type HandleUploadBody
+} from "@vercel/blob/client";
 import { list } from "@vercel/blob";
 import { jsonError } from "@/lib/agent/http";
 
@@ -10,7 +15,7 @@ const MAX_BLOB_UPLOAD_BYTES = Number(
   process.env.BLOB_MAX_UPLOAD_BYTES || DEFAULT_MAX_BLOB_UPLOAD_BYTES
 );
 
-export async function GET() {
+export async function GET(request: Request) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
 
   if (!token) {
@@ -18,15 +23,44 @@ export async function GET() {
   }
 
   const [, , , storeId = ""] = token.split("_");
+  const check = new URL(request.url).searchParams.get("check");
 
   try {
+    if (check === "client-mpu") {
+      const pathname = `diagnostics/${Date.now()}-client-mpu.mp4`;
+      const clientToken = await generateClientTokenFromReadWriteToken({
+        pathname,
+        token,
+        maximumSizeInBytes: MAX_BLOB_UPLOAD_BYTES,
+        validUntil: Date.now() + CLIENT_TOKEN_TTL_MS,
+        addRandomSuffix: false
+      });
+      const multipart = await createMultipartUpload(pathname, {
+        access: "public",
+        contentType: "video/mp4",
+        token: clientToken
+      });
+
+      return Response.json({
+        ok: true,
+        data: {
+          configured: true,
+          storeId: maskStoreId(storeId),
+          canCreateClientMultipartUpload: true,
+          pathname,
+          uploadId: multipart.uploadId ? "created" : "missing",
+          key: multipart.key ? "created" : "missing"
+        }
+      });
+    }
+
     const result = await list({ limit: 1 });
 
     return Response.json({
       ok: true,
       data: {
         configured: true,
-        storeId: storeId ? `${storeId.slice(0, 4)}...${storeId.slice(-4)}` : "unknown",
+        storeId: maskStoreId(storeId),
         canList: true,
         blobCount: result.blobs.length
       }
@@ -39,6 +73,10 @@ export async function GET() {
       500
     );
   }
+}
+
+function maskStoreId(storeId: string) {
+  return storeId ? `${storeId.slice(0, 4)}...${storeId.slice(-4)}` : "unknown";
 }
 
 export async function POST(request: Request) {
