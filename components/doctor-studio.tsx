@@ -1,6 +1,6 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
+import { createMultipartUploader, upload } from "@vercel/blob/client";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
@@ -107,6 +107,11 @@ type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+type BlobClientTokenResponse = {
+  type: "blob.generate-client-token";
+  clientToken: string;
+};
+
 async function postJson<T>(url: string, body?: Record<string, unknown>) {
   const response = await fetch(url, {
     method: "POST",
@@ -147,7 +152,42 @@ async function postFormData<T>(url: string, body: FormData) {
   return payload.data;
 }
 
+async function retrieveBlobClientToken(params: {
+  pathname: string;
+  multipart: boolean;
+  file: File;
+  uploadClient: string;
+}) {
+  const response = await fetch("/api/uploads/blob", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "blob.generate-client-token",
+      payload: {
+        pathname: params.pathname,
+        multipart: params.multipart,
+        clientPayload: JSON.stringify({
+          uploadClient: params.uploadClient,
+          kind: "doctor-video",
+          fileName: params.file.name,
+          sizeBytes: params.file.size,
+          contentType: params.file.type || "application/octet-stream"
+        })
+      }
+    })
+  });
+  const payload = (await response.json()) as BlobClientTokenResponse | { ok: false; error: string };
+
+  if (!response.ok || !("clientToken" in payload)) {
+    throw new Error("没有拿到 Blob 上传授权。");
+  }
+
+  return payload.clientToken;
+}
+
 const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
+const MANUAL_MULTIPART_THRESHOLD_BYTES = 5 * 1024 * 1024;
+const MANUAL_MULTIPART_PART_BYTES = 5 * 1024 * 1024;
 const BLOB_UPLOAD_MIN_TIMEOUT_MS = 5 * 60 * 1000;
 const BLOB_UPLOAD_MAX_TIMEOUT_MS = 45 * 60 * 1000;
 const BLOB_UPLOAD_TIMEOUT_PER_MB_MS = 3000;
@@ -603,24 +643,9 @@ async function uploadVideoToBlob(
   const controller = new AbortController();
   let timeoutId: number | undefined;
   const timeoutMs = blobUploadTimeoutMs(file.size);
+  const pathname = safeUploadPath(file.name);
 
-  const uploadTask = upload(safeUploadPath(file.name), file, {
-    access: "public",
-    contentType: file.type || "application/octet-stream",
-    handleUploadUrl: "/api/uploads/blob",
-    multipart: true,
-    abortSignal: controller.signal,
-    onUploadProgress: (progress) => {
-      onProgress?.(Math.max(0, Math.min(100, Math.round(progress.percentage))));
-    },
-    clientPayload: JSON.stringify({
-      uploadClient: "doctor-video-v2-force-multipart",
-      kind: "doctor-video",
-      fileName: file.name,
-      sizeBytes: file.size,
-      contentType: file.type || "application/octet-stream"
-    })
-  })
+  const uploadTask = uploadVideoWithBlobStrategy(file, pathname, controller.signal, onProgress)
     .then((blob): BlobUploadOutcome => ({ blob, status: "ok" }))
     .catch((error): BlobUploadOutcome => {
       const reason = error instanceof Error ? error.message : "unknown error";
@@ -651,6 +676,71 @@ async function uploadVideoToBlob(
       window.clearTimeout(timeoutId);
     }
   }
+}
+
+async function uploadVideoWithBlobStrategy(
+  file: File,
+  pathname: string,
+  abortSignal: AbortSignal,
+  onProgress?: (percentage: number) => void
+) {
+  if (file.size > MANUAL_MULTIPART_THRESHOLD_BYTES) {
+    return uploadVideoWithManualMultipart(file, pathname, abortSignal, onProgress);
+  }
+
+  return upload(pathname, file, {
+    access: "public",
+    contentType: file.type || "application/octet-stream",
+    handleUploadUrl: "/api/uploads/blob",
+    multipart: false,
+    abortSignal,
+    onUploadProgress: (progress) => {
+      onProgress?.(Math.max(0, Math.min(100, Math.round(progress.percentage))));
+    },
+    clientPayload: JSON.stringify({
+      uploadClient: "doctor-video-v3-single-put",
+      kind: "doctor-video",
+      fileName: file.name,
+      sizeBytes: file.size,
+      contentType: file.type || "application/octet-stream"
+    })
+  });
+}
+
+async function uploadVideoWithManualMultipart(
+  file: File,
+  pathname: string,
+  abortSignal: AbortSignal,
+  onProgress?: (percentage: number) => void
+) {
+  const token = await retrieveBlobClientToken({
+    pathname,
+    multipart: true,
+    file,
+    uploadClient: "doctor-video-v3-manual-multipart"
+  });
+  const uploader = await createMultipartUploader(pathname, {
+    access: "public",
+    token,
+    contentType: file.type || "application/octet-stream",
+    abortSignal
+  });
+  const parts = [];
+  let partNumber = 1;
+
+  for (let offset = 0; offset < file.size; offset += MANUAL_MULTIPART_PART_BYTES) {
+    const end = Math.min(file.size, offset + MANUAL_MULTIPART_PART_BYTES);
+    const partBlob = file.slice(offset, end, "application/octet-stream");
+    const part = await uploader.uploadPart(partNumber, partBlob);
+    parts.push(part);
+    onProgress?.(Math.max(0, Math.min(99, Math.round((end / file.size) * 100))));
+    partNumber += 1;
+  }
+
+  const blob = await uploader.complete(parts);
+  onProgress?.(100);
+
+  return blob;
 }
 
 async function transcribeVideoFile(
