@@ -110,7 +110,11 @@ export async function callJsonModel(params: {
 }) {
   const apiKey = getApiKey();
   if (!apiKey) {
-    return params.fallback;
+    console.warn("[AI] skipped: missing API key in server environment.");
+    return {
+      ...params.fallback,
+      __aiStatus: "missing_api_key"
+    };
   }
 
   const provider = getProvider();
@@ -213,7 +217,10 @@ export async function callJsonModel(params: {
       console.warn(
         `[AI] request failed: provider=${provider} status=${response.status} model=${model} url=${url} body=${errorText.slice(0, 500)}`
       );
-      return params.fallback;
+      return {
+        ...params.fallback,
+        __aiStatus: `request_failed_${response.status}`
+      };
     }
 
     const data = (await response.json()) as {
@@ -226,7 +233,11 @@ export async function callJsonModel(params: {
         : data.choices?.[0]?.message?.content;
 
     if (!content) {
-      return params.fallback;
+      console.warn(`[AI] empty response: provider=${provider} model=${model}`);
+      return {
+        ...params.fallback,
+        __aiStatus: "empty_response"
+      };
     }
 
     return extractJson(content);
@@ -234,6 +245,9 @@ export async function callJsonModel(params: {
     console.warn(
       `[AI] request error: provider=${provider} model=${model} ${error instanceof Error ? error.message : "unknown error"}`
     );
-    return params.fallback;
+    return {
+      ...params.fallback,
+      __aiStatus: "request_error"
+    };
   }
 }

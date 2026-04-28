@@ -18,25 +18,33 @@ export async function runAgentSession(
   const fallback = buildFallbackRun(session, profile);
   const visualInputs = session.module === "doctor" ? buildVisualInputs(artifacts) : [];
 
-  const result = normalizeRunResult(
-    await callJsonModel({
-      system: `${getModuleSystemPrompt(session.module)}
+  const rawResult = await callJsonModel({
+    system: `${getModuleSystemPrompt(session.module)}
 必须返回如下 JSON 字段：
 ${resultSchemaForModule(session.module)}`,
-      user: {
-        brain: summarizeBrainForPrompt(brain.profile),
-        recentMemories: brain.memories.slice(0, 8),
-        session,
-        artifacts,
-        visualInputs: visualInputs.map((item) => ({
-          label: item.label
-        }))
-      },
-      fallback,
-      images: visualInputs
-    }),
+    user: {
+      brain: summarizeBrainForPrompt(brain.profile),
+      recentMemories: brain.memories.slice(0, 8),
+      session,
+      artifacts,
+      visualInputs: visualInputs.map((item) => ({
+        label: item.label
+      }))
+    },
+    fallback,
+    images: visualInputs
+  });
+  const result = normalizeRunResult(
+    rawResult,
     fallback
   );
+
+  if (session.module === "doctor" && typeof rawResult.__aiStatus === "string") {
+    result.output = {
+      ...result.output,
+      _aiStatus: rawResult.__aiStatus
+    };
+  }
 
   const nextSession = mergeRunIntoSession(session, result);
   return upsertSession(nextSession);

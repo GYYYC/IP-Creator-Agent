@@ -10,6 +10,7 @@ type DoctorOutput = {
   evidence?: string;
   timeline?: Array<{ label: string; title: string; description: string }>;
   actions?: string[];
+  _aiStatus?: string;
 };
 
 type ApiSession = {
@@ -163,6 +164,18 @@ function hasDoctorOutput(output: DoctorOutput | undefined) {
       output?.timeline?.length ||
       output?.actions?.length
   );
+}
+
+function completionMessage(output: DoctorOutput) {
+  if (output._aiStatus === "missing_api_key") {
+    return "线上没有读取到模型 API Key，这次先显示基础判断。";
+  }
+
+  if (output._aiStatus) {
+    return "模型这次没有返回可用结果，先显示基础判断。";
+  }
+
+  return "复盘完成";
 }
 
 function isImageFile(file: File) {
@@ -608,7 +621,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       setSession(nextSession);
       setMessage(
         hasDoctorOutput(run.session.output)
-          ? "复盘完成"
+          ? completionMessage(run.session.output)
           : "这次先按当前素材给出基础判断，可以补充时间点或留存图再跑一次。"
       );
       window.requestAnimationFrame(() => {
