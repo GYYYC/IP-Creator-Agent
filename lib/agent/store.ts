@@ -29,6 +29,7 @@ const databaseUrl =
   process.env.POSTGRES_PRISMA_URL ||
   process.env.POSTGRES_URL_NON_POOLING ||
   "";
+const poolConnectionString = normalizeDatabaseUrlForPg(databaseUrl);
 
 let writeQueue: Promise<void> = Promise.resolve();
 let pool: Pool | null = null;
@@ -38,11 +39,47 @@ function useDatabase() {
   return Boolean(databaseUrl);
 }
 
+function normalizeDatabaseUrlForPg(value: string) {
+  if (!value) {
+    return value;
+  }
+
+  try {
+    const url = new URL(value);
+    const sslMode = url.searchParams.get("sslmode");
+
+    if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
+      url.searchParams.set("sslmode", "verify-full");
+    }
+
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+function isLocalDatabaseUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return value.includes("localhost");
+  }
+}
+
+function hasSslMode(value: string) {
+  try {
+    return new URL(value).searchParams.has("sslmode");
+  } catch {
+    return false;
+  }
+}
+
 function getPool() {
   if (!pool) {
     pool = new Pool({
-      connectionString: databaseUrl,
-      ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false }
+      connectionString: poolConnectionString,
+      ...(!hasSslMode(poolConnectionString) ? { ssl: !isLocalDatabaseUrl(poolConnectionString) } : {})
     });
   }
 
