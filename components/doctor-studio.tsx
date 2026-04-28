@@ -142,6 +142,8 @@ async function postFormData<T>(url: string, body: FormData) {
 }
 
 const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
+const BLOB_MULTIPART_THRESHOLD_BYTES = 25 * 1024 * 1024;
+const BLOB_UPLOAD_TIMEOUT_MS = 180000;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -574,13 +576,23 @@ async function readVideoMetadata(file: File): Promise<VideoMetadata> {
   }
 }
 
-async function uploadVideoToBlob(file: File): Promise<BlobUploadResult | null> {
+async function uploadVideoToBlob(
+  file: File,
+  onProgress?: (percentage: number) => void
+): Promise<BlobUploadResult | null> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), BLOB_UPLOAD_TIMEOUT_MS);
+
   try {
     return await upload(safeUploadPath(file.name), file, {
       access: "public",
       contentType: file.type || "application/octet-stream",
       handleUploadUrl: "/api/uploads/blob",
-      multipart: true,
+      multipart: file.size > BLOB_MULTIPART_THRESHOLD_BYTES,
+      abortSignal: controller.signal,
+      onUploadProgress: (progress) => {
+        onProgress?.(Math.max(0, Math.min(100, Math.round(progress.percentage))));
+      },
       clientPayload: JSON.stringify({
         kind: "doctor-video",
         fileName: file.name
@@ -591,6 +603,8 @@ async function uploadVideoToBlob(file: File): Promise<BlobUploadResult | null> {
       `[Doctor] Blob upload failed: ${error instanceof Error ? error.message : "unknown error"}`
     );
     return null;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -876,7 +890,9 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
         videoMetadata.push(metadata);
 
         setMessage(`正在上传 ${file.name}`);
-        const blob = await uploadVideoToBlob(file);
+        const blob = await uploadVideoToBlob(file, (percentage) => {
+          setMessage(`正在上传 ${file.name} ${percentage}%`);
+        });
 
         if (blob?.url) {
           artifactPayloads.push({
