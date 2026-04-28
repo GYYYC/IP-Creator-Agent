@@ -121,12 +121,18 @@ async function readDatabaseStore(): Promise<AgentStoreShape> {
   const client = await getPool().connect();
 
   try {
-    const [profiles, memories, sessions, artifacts] = await Promise.all([
-      client.query<{ data: CreatorProfile }>("select data from agent_profiles order by updated_at desc"),
-      client.query<{ data: BrainMemoryEntry }>("select data from agent_memories order by created_at desc"),
-      client.query<{ data: AgentSession }>("select data from agent_sessions order by updated_at desc"),
-      client.query<{ data: ArtifactRecord }>("select data from agent_artifacts order by created_at desc")
-    ]);
+    const profiles = await client.query<{ data: CreatorProfile }>(
+      "select data from agent_profiles order by updated_at desc"
+    );
+    const memories = await client.query<{ data: BrainMemoryEntry }>(
+      "select data from agent_memories order by created_at desc"
+    );
+    const sessions = await client.query<{ data: AgentSession }>(
+      "select data from agent_sessions order by updated_at desc"
+    );
+    const artifacts = await client.query<{ data: ArtifactRecord }>(
+      "select data from agent_artifacts order by created_at desc"
+    );
 
     return {
       profiles: profiles.rows.map((row) => row.data),
