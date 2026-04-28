@@ -1,6 +1,10 @@
 type JsonRecord = Record<string, unknown>;
 
 type AiProvider = "openai" | "anthropic";
+type ModelImageInput = {
+  dataUrl: string;
+  label?: string;
+};
 
 const DEFAULT_BASE_URL =
   process.env.OPENAI_BASE_URL ||
@@ -71,6 +75,19 @@ function extractJson(text: string) {
   return JSON.parse(match[0]) as JsonRecord;
 }
 
+function parseDataUrl(dataUrl: string) {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    mediaType: match[1],
+    base64: match[2]
+  };
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -89,6 +106,7 @@ export async function callJsonModel(params: {
   system: string;
   user: JsonRecord;
   fallback: JsonRecord;
+  images?: ModelImageInput[];
 }) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -100,6 +118,49 @@ export async function callJsonModel(params: {
 
   try {
     const url = provider === "anthropic" ? getMessagesUrl() : getChatCompletionsUrl();
+    const images = params.images?.filter((image) => image.dataUrl.startsWith("data:image/")) ?? [];
+    const userText = JSON.stringify(params.user);
+    const openAiUserContent = images.length
+      ? [
+          {
+            type: "text",
+            text: userText
+          },
+          ...images.map((image) => ({
+            type: "image_url",
+            image_url: {
+              url: image.dataUrl,
+              detail: "high"
+            }
+          }))
+        ]
+      : userText;
+    const anthropicUserContent = images.length
+      ? [
+          {
+            type: "text",
+            text: userText
+          },
+          ...images.flatMap((image) => {
+            const parsed = parseDataUrl(image.dataUrl);
+
+            if (!parsed) {
+              return [];
+            }
+
+            return [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: parsed.mediaType,
+                  data: parsed.base64
+                }
+              }
+            ];
+          })
+        ]
+      : JSON.stringify(params.user);
     const response = await fetchWithTimeout(
       url,
       provider === "anthropic"
@@ -118,7 +179,7 @@ export async function callJsonModel(params: {
               messages: [
                 {
                   role: "user",
-                  content: JSON.stringify(params.user)
+                  content: anthropicUserContent
                 }
               ]
             })
@@ -140,7 +201,7 @@ export async function callJsonModel(params: {
                 },
                 {
                   role: "user",
-                  content: JSON.stringify(params.user)
+                  content: openAiUserContent
                 }
               ]
             })

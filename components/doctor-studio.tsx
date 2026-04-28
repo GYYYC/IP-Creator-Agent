@@ -26,6 +26,31 @@ type ArtifactResponse = {
   };
 };
 
+type RegisteredArtifactInput = {
+  file: File;
+  kind: string;
+  visualRole: "content" | "data";
+};
+
+type ArtifactRegistrationInput = {
+  kind: string;
+  mimeType: string;
+  fileName: string;
+  sizeBytes?: number;
+  extractedJson?: Record<string, unknown>;
+};
+
+type RetentionImageInput = {
+  fileName: string;
+  dataUrl: string;
+};
+
+type FrameTimePlan = {
+  source: "user" | "retention" | "duration";
+  times: number[];
+  reason?: string;
+};
+
 type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
@@ -140,6 +165,272 @@ function hasDoctorOutput(output: DoctorOutput | undefined) {
   );
 }
 
+function isImageFile(file: File) {
+  return file.type.startsWith("image/");
+}
+
+function isVideoFile(file: File) {
+  return file.type.startsWith("video/");
+}
+
+async function fileToVisualDataUrl(file: File) {
+  if (!isImageFile(file)) {
+    return undefined;
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const maxSide = 1600;
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    bitmap.close();
+    return undefined;
+  }
+
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function waitForMediaEvent(target: HTMLMediaElement, eventName: string) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      target.removeEventListener(eventName, handleEvent);
+      target.removeEventListener("error", handleError);
+    };
+    const handleEvent = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("视频素材暂时没有读取成功。"));
+    };
+
+    target.addEventListener(eventName, handleEvent, { once: true });
+    target.addEventListener("error", handleError, { once: true });
+  });
+}
+
+function normalizeFrameTimes(times: number[], duration: number, limit = 8) {
+  const max = Math.max(0, duration);
+
+  return Array.from(
+    new Set(
+      times
+        .filter((time) => Number.isFinite(time))
+        .map((time) => Math.min(max, Math.max(0, Math.round(time * 10) / 10)))
+    )
+  )
+    .sort((a, b) => a - b)
+    .slice(0, limit);
+}
+
+function aroundTime(time: number) {
+  return [time - 2, time, time + 2];
+}
+
+function frameTimesForDuration(duration: number) {
+  if (duration <= 15) {
+    return normalizeFrameTimes([0, 1, 3, duration / 2, duration - 1], duration);
+  }
+
+  if (duration <= 60) {
+    return normalizeFrameTimes([0, 1, 3, 8, 15, duration / 2, duration - 5], duration);
+  }
+
+  if (duration <= 180) {
+    return normalizeFrameTimes(
+      [0, 1, 3, 8, 15, 30, duration * 0.5, duration - 8],
+      duration
+    );
+  }
+
+  return normalizeFrameTimes(
+    [0, 1, 3, 8, 15, 30, duration * 0.25, duration * 0.5, duration - 10],
+    duration
+  );
+}
+
+function frameTimesFromText(text: string, duration: number) {
+  const normalized = text.replace(/０/g, "0").replace(/１/g, "1").replace(/２/g, "2")
+    .replace(/３/g, "3").replace(/４/g, "4").replace(/５/g, "5")
+    .replace(/６/g, "6").replace(/７/g, "7").replace(/８/g, "8")
+    .replace(/９/g, "9");
+  const times: number[] = [];
+  const firstSeconds = normalized.match(/前\s*(\d+(?:\.\d+)?)\s*(秒|s|S)/);
+
+  if (firstSeconds) {
+    const end = Number(firstSeconds[1]);
+    return normalizeFrameTimes([0, 1, 3, end], duration);
+  }
+
+  if (/(开头|前面|前段|前半段|起手|前\s*3\s*(秒|s|S))/.test(normalized)) {
+    times.push(0, 1, 3, 8);
+  }
+
+  if (/(结尾|最后|尾段|收尾)/.test(normalized)) {
+    times.push(duration - 8, duration - 5, duration - 2);
+  }
+
+  for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)/g)) {
+    times.push(Number(match[1]) * 60 + Number(match[2]));
+  }
+
+  for (const match of normalized.matchAll(
+    /(\d+(?:\.\d+)?)\s*(?:-|~|～|到|至)\s*(\d+(?:\.\d+)?)\s*(秒|s|S)/g
+  )) {
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    times.push(start, (start + end) / 2, end);
+  }
+
+  const exactTimes = Array.from(
+    normalized.matchAll(/(?<!播放|浏览|点赞|收藏|评论)(\d+(?:\.\d+)?)\s*(秒|s|S)/g)
+  ).map((match) => Number(match[1]));
+
+  if (exactTimes.length === 1) {
+    times.push(...aroundTime(exactTimes[0]));
+  } else {
+    for (const time of exactTimes) {
+      times.push(time);
+    }
+  }
+
+  return normalizeFrameTimes(times, duration);
+}
+
+async function resolveFrameTimePlan(params: {
+  duration: number;
+  notes: string;
+  stats: string;
+  retentionImages: RetentionImageInput[];
+}) {
+  const fromUser = frameTimesFromText(`${params.notes}\n${params.stats}`, params.duration);
+
+  if (fromUser.length) {
+    return {
+      source: "user",
+      times: fromUser,
+      reason: "按你写的时间点取关键画面"
+    } satisfies FrameTimePlan;
+  }
+
+  if (params.retentionImages.length) {
+    try {
+      const result = await postJson<{ times: number[]; reason?: string }>(
+        "/api/doctor/frame-times",
+        {
+          duration: params.duration,
+          notes: params.notes,
+          stats: params.stats,
+          images: params.retentionImages
+        }
+      );
+      const times = normalizeFrameTimes(result.times ?? [], params.duration);
+
+      if (times.length) {
+        return {
+          source: "retention",
+          times,
+          reason: result.reason || "按留存图里的掉点取关键画面"
+        } satisfies FrameTimePlan;
+      }
+    } catch {
+      // Fall through to the duration-aware default.
+    }
+  }
+
+  return {
+    source: "duration",
+    times: frameTimesForDuration(params.duration),
+    reason: "按视频长度取开头、转折和结尾画面"
+  } satisfies FrameTimePlan;
+}
+
+async function extractVideoFrameArtifacts(
+  file: File,
+  params: {
+    notes: string;
+    stats: string;
+    retentionImages: RetentionImageInput[];
+  }
+): Promise<ArtifactRegistrationInput[]> {
+  if (!isVideoFile(file)) {
+    return [];
+  }
+
+  const video = document.createElement("video");
+  const objectUrl = URL.createObjectURL(file);
+  video.src = objectUrl;
+  video.muted = true;
+  video.preload = "metadata";
+  video.playsInline = true;
+
+  try {
+    await waitForMediaEvent(video, "loadedmetadata");
+    await waitForMediaEvent(video, "loadeddata").catch(() => undefined);
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const plan = await resolveFrameTimePlan({
+      duration,
+      notes: params.notes,
+      stats: params.stats,
+      retentionImages: params.retentionImages
+    });
+    const maxSide = 1600;
+    const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const width = Math.max(1, Math.round(video.videoWidth * scale));
+    const height = Math.max(1, Math.round(video.videoHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return [];
+    }
+
+    const frameArtifacts: ArtifactRegistrationInput[] = [];
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+
+    for (const time of plan.times) {
+      const safeTime = Math.min(time, Math.max(0, duration - 0.1));
+      if (Math.abs(video.currentTime - safeTime) > 0.05) {
+        video.currentTime = safeTime;
+        await waitForMediaEvent(video, "seeked");
+      }
+      context.drawImage(video, 0, 0, width, height);
+      const visualDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      frameArtifacts.push({
+        kind: "image",
+        mimeType: "image/jpeg",
+        fileName: `${baseName} ${time}s frame.jpg`,
+        extractedJson: {
+          visualDataUrl,
+          visualRole: "video_frame",
+          frameTimeSeconds: time,
+          frameSelectionSource: plan.source,
+          frameSelectionReason: plan.reason,
+          sourceFileName: file.name
+        }
+      });
+    }
+
+    return frameArtifacts;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
 export function DoctorStudio({ initialSessionId }: { initialSessionId?: string } = {}) {
   const [mode, setMode] = useState<ContentMode>("video");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
@@ -230,23 +521,65 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
     setLoading(true);
     setMessage("");
     try {
-      const artifacts = await Promise.all(
-        [
-          ...contentFiles.map((file) => ({
-            file,
-            kind: mode === "video" ? "video" : "graphic_post"
-          })),
-          ...dataFiles.map((file) => ({
-            file,
-            kind: mode === "video" ? "retention_chart" : "image"
-          }))
-        ].map(({ file, kind }) =>
-          postJson<ArtifactResponse>("/api/artifacts/register", {
-            kind,
-            mimeType: file.type,
+      setMessage("正在读取素材");
+      const artifactInputs: RegisteredArtifactInput[] = [
+        ...contentFiles.map((file) => ({
+          file,
+          kind: mode === "video" ? "video" : "graphic_post",
+          visualRole: "content" as const
+        })),
+        ...dataFiles.map((file) => ({
+          file,
+          kind: mode === "video" ? "retention_chart" : "image",
+          visualRole: "data" as const
+        }))
+      ];
+      const artifactPayloads: ArtifactRegistrationInput[] = [];
+      const retentionImages: RetentionImageInput[] = [];
+      const videoFiles: File[] = [];
+
+      for (const { file, kind, visualRole } of artifactInputs) {
+        const visualDataUrl = await fileToVisualDataUrl(file);
+        artifactPayloads.push({
+          kind,
+          mimeType: file.type,
+          fileName: file.name,
+          sizeBytes: file.size,
+          extractedJson: visualDataUrl
+            ? {
+                visualDataUrl,
+                visualRole
+              }
+            : undefined
+        });
+
+        if (mode === "video" && visualRole === "content" && isVideoFile(file)) {
+          videoFiles.push(file);
+        }
+
+        if (mode === "video" && visualRole === "data" && visualDataUrl) {
+          retentionImages.push({
             fileName: file.name,
-            sizeBytes: file.size
-          })
+            dataUrl: visualDataUrl
+          });
+        }
+      }
+
+      for (const file of videoFiles) {
+        setMessage(`正在提取 ${file.name} 的关键画面`);
+        artifactPayloads.push(
+          ...(await extractVideoFrameArtifacts(file, {
+            notes,
+            stats,
+            retentionImages
+          }))
+        );
+        }
+
+      setMessage("正在分析作品");
+      const artifacts = await Promise.all(
+        artifactPayloads.map((payload) =>
+          postJson<ArtifactResponse>("/api/artifacts/register", payload)
         )
       );
       const created = await postJson<{ session: ApiSession }>("/api/sessions", {

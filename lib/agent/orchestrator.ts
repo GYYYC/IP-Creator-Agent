@@ -6,7 +6,7 @@ import {
   normalizeRunResult
 } from "@/lib/agent/module-configs";
 import { getStore, upsertSession } from "@/lib/agent/store";
-import { AgentRunResult, AgentSession, CreatorProfile } from "@/lib/agent/types";
+import { AgentRunResult, AgentSession, ArtifactRecord, CreatorProfile } from "@/lib/agent/types";
 
 export async function runAgentSession(
   session: AgentSession,
@@ -16,6 +16,7 @@ export async function runAgentSession(
   const store = await getStore();
   const artifacts = store.artifacts.filter((artifact) => session.artifactIds.includes(artifact.id));
   const fallback = buildFallbackRun(session, profile);
+  const visualInputs = session.module === "doctor" ? buildVisualInputs(artifacts) : [];
 
   const result = normalizeRunResult(
     await callJsonModel({
@@ -26,15 +27,63 @@ ${resultSchemaForModule(session.module)}`,
         brain: summarizeBrainForPrompt(brain.profile),
         recentMemories: brain.memories.slice(0, 8),
         session,
-        artifacts
+        artifacts,
+        visualInputs: visualInputs.map((item) => ({
+          label: item.label
+        }))
       },
-      fallback
+      fallback,
+      images: visualInputs
     }),
     fallback
   );
 
   const nextSession = mergeRunIntoSession(session, result);
   return upsertSession(nextSession);
+}
+
+function buildVisualInputs(artifacts: ArtifactRecord[]) {
+  return artifacts
+    .map((artifact) => {
+      const dataUrl =
+        artifact.extractedJson &&
+        typeof artifact.extractedJson.visualDataUrl === "string" &&
+        artifact.extractedJson.visualDataUrl.startsWith("data:image/")
+          ? artifact.extractedJson.visualDataUrl
+          : "";
+
+      if (!dataUrl) {
+        return null;
+      }
+
+      const role =
+        artifact.extractedJson && typeof artifact.extractedJson.visualRole === "string"
+          ? artifact.extractedJson.visualRole
+          : artifact.kind;
+      const frameTime =
+        artifact.extractedJson && typeof artifact.extractedJson.frameTimeSeconds === "number"
+          ? ` @ ${artifact.extractedJson.frameTimeSeconds}s`
+          : "";
+      const sourceFile =
+        artifact.extractedJson && typeof artifact.extractedJson.sourceFileName === "string"
+          ? ` from ${artifact.extractedJson.sourceFileName}`
+          : "";
+      const frameSource =
+        artifact.extractedJson && typeof artifact.extractedJson.frameSelectionSource === "string"
+          ? ` frameSelectionSource=${artifact.extractedJson.frameSelectionSource}`
+          : "";
+      const frameReason =
+        artifact.extractedJson && typeof artifact.extractedJson.frameSelectionReason === "string"
+          ? ` reason=${artifact.extractedJson.frameSelectionReason}`
+          : "";
+
+      return {
+        dataUrl,
+        label: `${role}${frameTime}${sourceFile}${frameSource}${frameReason}: ${artifact.fileName}`
+      };
+    })
+    .filter((item): item is { dataUrl: string; label: string } => Boolean(item))
+    .slice(0, 8);
 }
 
 function resultSchemaForModule(module: AgentSession["module"]) {
