@@ -1,4 +1,5 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { list } from "@vercel/blob";
 import { jsonError } from "@/lib/agent/http";
 
 export const runtime = "nodejs";
@@ -8,6 +9,37 @@ const CLIENT_TOKEN_TTL_MS = 3 * 60 * 60 * 1000;
 const MAX_BLOB_UPLOAD_BYTES = Number(
   process.env.BLOB_MAX_UPLOAD_BYTES || DEFAULT_MAX_BLOB_UPLOAD_BYTES
 );
+
+export async function GET() {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+
+  if (!token) {
+    return jsonError("Blob storage is not configured.", 500);
+  }
+
+  const [, , , storeId = ""] = token.split("_");
+
+  try {
+    const result = await list({ limit: 1 });
+
+    return Response.json({
+      ok: true,
+      data: {
+        configured: true,
+        storeId: storeId ? `${storeId.slice(0, 4)}...${storeId.slice(-4)}` : "unknown",
+        canList: true,
+        blobCount: result.blobs.length
+      }
+    });
+  } catch (error) {
+    console.warn(`[Blob] diagnostics failed: ${error instanceof Error ? error.message : "unknown error"}`);
+
+    return jsonError(
+      error instanceof Error ? `Blob token check failed: ${error.message}` : "Blob token check failed.",
+      500
+    );
+  }
+}
 
 export async function POST(request: Request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -24,7 +56,6 @@ export async function POST(request: Request) {
         const options = {
           maximumSizeInBytes: MAX_BLOB_UPLOAD_BYTES,
           validUntil: Date.now() + CLIENT_TOKEN_TTL_MS,
-          addRandomSuffix: true,
           tokenPayload: clientPayload
         };
 
@@ -33,11 +64,15 @@ export async function POST(request: Request) {
         );
 
         if (payload?.kind === "doctor-video") {
-          return options;
+          return {
+            ...options,
+            addRandomSuffix: false
+          };
         }
 
         return {
           ...options,
+          addRandomSuffix: true,
           allowedContentTypes: ["image/*", "video/*", "application/octet-stream"]
         };
       }
