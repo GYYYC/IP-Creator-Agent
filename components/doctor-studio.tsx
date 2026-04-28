@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
 
@@ -432,6 +432,7 @@ async function extractVideoFrameArtifacts(
 }
 
 export function DoctorStudio({ initialSessionId }: { initialSessionId?: string } = {}) {
+  const resultRef = useRef<HTMLElement | null>(null);
   const [mode, setMode] = useState<ContentMode>("video");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
   const [dataFiles, setDataFiles] = useState<File[]>([]);
@@ -574,7 +575,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             retentionImages
           }))
         );
-        }
+      }
 
       setMessage("正在分析作品");
       const artifacts = await Promise.all(
@@ -598,7 +599,21 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       const run = await postJson<{ session: ApiSession }>(
         `/api/sessions/${created.session.id}/run`
       );
-      setSession(run.session);
+      const nextSession = hasDoctorOutput(run.session.output)
+        ? run.session
+        : {
+            ...run.session,
+            output: fallbackOutput
+          };
+      setSession(nextSession);
+      setMessage(
+        hasDoctorOutput(run.session.output)
+          ? "复盘完成"
+          : "这次先按当前素材给出基础判断，可以补充时间点或留存图再跑一次。"
+      );
+      window.requestAnimationFrame(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "暂时没有连上后端，已保留当前输入。");
     } finally {
@@ -722,7 +737,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
           {message ? <p className="muted">{message}</p> : null}
         </section>
 
-        <aside className="surface-card glass">
+        <aside className="surface-card glass" ref={resultRef}>
           <span className="label">本次结论</span>
           <h3>这次先改这几件事</h3>
           <div className="callout warning">
