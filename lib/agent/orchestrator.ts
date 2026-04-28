@@ -15,6 +15,8 @@ export async function runAgentSession(
   const brain = await loadBrain(profile);
   const store = await getStore();
   const artifacts = store.artifacts.filter((artifact) => session.artifactIds.includes(artifact.id));
+  const promptArtifacts =
+    session.module === "doctor" ? artifacts.map(stripVisualDataFromArtifact) : artifacts;
   const fallback = buildFallbackRun(session, profile);
   const visualInputs = session.module === "doctor" ? buildVisualInputs(artifacts) : [];
 
@@ -26,7 +28,7 @@ ${resultSchemaForModule(session.module)}`,
       brain: summarizeBrainForPrompt(brain.profile),
       recentMemories: brain.memories.slice(0, 8),
       session,
-      artifacts,
+      artifacts: promptArtifacts,
       visualInputs: visualInputs.map((item) => ({
         label: item.label
       }))
@@ -48,6 +50,19 @@ ${resultSchemaForModule(session.module)}`,
 
   const nextSession = mergeRunIntoSession(session, result);
   return upsertSession(nextSession);
+}
+
+function stripVisualDataFromArtifact(artifact: ArtifactRecord): ArtifactRecord {
+  if (!artifact.extractedJson?.visualDataUrl) {
+    return artifact;
+  }
+
+  const { visualDataUrl: _visualDataUrl, ...extractedJson } = artifact.extractedJson;
+
+  return {
+    ...artifact,
+    extractedJson
+  };
 }
 
 function buildVisualInputs(artifacts: ArtifactRecord[]) {

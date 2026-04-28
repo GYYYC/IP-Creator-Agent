@@ -124,6 +124,9 @@ export async function callJsonModel(params: {
     const url = provider === "anthropic" ? getMessagesUrl() : getChatCompletionsUrl();
     const images = params.images?.filter((image) => image.dataUrl.startsWith("data:image/")) ?? [];
     const userText = JSON.stringify(params.user);
+    console.info(
+      `[AI] calling model: provider=${provider} model=${model} images=${images.length} userBytes=${userText.length}`
+    );
     const openAiUserContent = images.length
       ? [
           {
