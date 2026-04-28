@@ -36,7 +36,7 @@ export async function GET(request: Request) {
         addRandomSuffix: false
       });
       const multipart = await createMultipartUpload(pathname, {
-        access: "public",
+        access: "private",
         contentType: "video/mp4",
         token: clientToken
       });

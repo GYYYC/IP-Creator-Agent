@@ -689,7 +689,7 @@ async function uploadVideoWithBlobStrategy(
   }
 
   return upload(pathname, file, {
-    access: "public",
+    access: "private",
     contentType: file.type || "application/octet-stream",
     handleUploadUrl: "/api/uploads/blob",
     multipart: false,
@@ -720,7 +720,7 @@ async function uploadVideoWithManualMultipart(
     uploadClient: "doctor-video-v3-manual-multipart"
   });
   const uploader = await createMultipartUploader(pathname, {
-    access: "public",
+    access: "private",
     token,
     contentType: file.type || "application/octet-stream",
     abortSignal
@@ -749,11 +749,10 @@ async function transcribeVideoFile(
   blob: BlobUploadResult | null
 ): Promise<VideoTranscript> {
   if (blob?.url) {
-    const sourceUrl = blob.downloadUrl || blob.url;
-
     try {
       return await postJson<VideoTranscript>("/api/doctor/transcribe", {
-        url: sourceUrl,
+        url: blob.url,
+        storageKey: blob.pathname,
         fileName: file.name,
         contentType: file.type,
         durationSeconds
@@ -765,7 +764,7 @@ async function transcribeVideoFile(
         durationSeconds,
         estimatedWordCount: 0,
         status: "request_error",
-        url: sourceUrl,
+        url: blob.url,
         message: error instanceof Error ? error.message : "这次没有拿到口播转写。"
       };
     }

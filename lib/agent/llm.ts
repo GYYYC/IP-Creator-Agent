@@ -1,3 +1,5 @@
+import { get } from "@vercel/blob";
+
 type JsonRecord = Record<string, unknown>;
 
 type AiProvider = "openai" | "anthropic";
@@ -296,6 +298,47 @@ export async function transcribeAudioUrl(params: {
   } catch (error) {
     console.warn(
       `[AI] transcription source fetch error: ${error instanceof Error ? error.message : "unknown error"}`
+    );
+    return {
+      text: "",
+      model: getTranscriptionModel(),
+      status: "source_request_error"
+    };
+  }
+}
+
+export async function transcribeAudioBlobPath(params: {
+  pathname: string;
+  fileName: string;
+  contentType?: string;
+  language?: string;
+}) {
+  try {
+    const result = await get(params.pathname, {
+      access: "private",
+      useCache: false
+    });
+
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      return {
+        text: "",
+        model: getTranscriptionModel(),
+        status: result ? `source_failed_${result.statusCode}` : "source_not_found"
+      };
+    }
+
+    const blob = await new Response(result.stream).blob();
+    const file = new File([blob], params.fileName, {
+      type: params.contentType || result.blob.contentType || blob.type || "application/octet-stream"
+    });
+
+    return transcribeAudioFile({
+      file,
+      language: params.language
+    });
+  } catch (error) {
+    console.warn(
+      `[AI] transcription private blob fetch error: ${error instanceof Error ? error.message : "unknown error"}`
     );
     return {
       text: "",

@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/agent/http";
-import { transcribeAudioFile, transcribeAudioUrl } from "@/lib/agent/llm";
+import { transcribeAudioBlobPath, transcribeAudioFile, transcribeAudioUrl } from "@/lib/agent/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -14,19 +14,27 @@ export async function POST(request: Request) {
   if (contentType.includes("application/json")) {
     const body = (await request.json()) as Record<string, unknown>;
     const url = typeof body.url === "string" ? body.url : "";
+    const storageKey = typeof body.storageKey === "string" ? body.storageKey : "";
     const fileName = typeof body.fileName === "string" ? body.fileName : "video.mp4";
     const durationSeconds = Number(body.durationSeconds || 0);
 
-    if (!url) {
-      return jsonError("URL is required.");
+    if (!url && !storageKey) {
+      return jsonError("URL or storageKey is required.");
     }
 
-    const result = await transcribeAudioUrl({
-      url,
-      fileName,
-      contentType: typeof body.contentType === "string" ? body.contentType : undefined,
-      language: "zh"
-    });
+    const result = storageKey
+      ? await transcribeAudioBlobPath({
+          pathname: storageKey,
+          fileName,
+          contentType: typeof body.contentType === "string" ? body.contentType : undefined,
+          language: "zh"
+        })
+      : await transcribeAudioUrl({
+          url,
+          fileName,
+          contentType: typeof body.contentType === "string" ? body.contentType : undefined,
+          language: "zh"
+        });
     const text = result.text.trim();
 
     return jsonOk({
