@@ -148,7 +148,7 @@ async function postFormData<T>(url: string, body: FormData) {
 }
 
 const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
-const BLOB_MULTIPART_THRESHOLD_BYTES = 25 * 1024 * 1024;
+const BLOB_MULTIPART_THRESHOLD_BYTES = DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES;
 const BLOB_UPLOAD_MIN_TIMEOUT_MS = 5 * 60 * 1000;
 const BLOB_UPLOAD_MAX_TIMEOUT_MS = 45 * 60 * 1000;
 const BLOB_UPLOAD_TIMEOUT_PER_MB_MS = 3000;
@@ -616,7 +616,9 @@ async function uploadVideoToBlob(
     },
     clientPayload: JSON.stringify({
       kind: "doctor-video",
-      fileName: file.name
+      fileName: file.name,
+      sizeBytes: file.size,
+      contentType: file.type || "application/octet-stream"
     })
   })
     .then((blob): BlobUploadOutcome => ({ blob, status: "ok" }))

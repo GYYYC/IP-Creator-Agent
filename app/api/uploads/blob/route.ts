@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const result = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (_pathname, clientPayload) => {
+      onBeforeGenerateToken: async (pathname, clientPayload, multipart) => {
         const payload = parseClientPayload(clientPayload);
         const options = {
           maximumSizeInBytes: MAX_BLOB_UPLOAD_BYTES,
@@ -27,6 +27,10 @@ export async function POST(request: Request) {
           addRandomSuffix: true,
           tokenPayload: clientPayload
         };
+
+        console.info(
+          `[Blob] token request: kind=${payload?.kind ?? "unknown"} multipart=${multipart} size=${payload?.sizeBytes ?? "unknown"} contentType=${payload?.contentType ?? "unknown"} pathname=${pathname}`
+        );
 
         if (payload?.kind === "doctor-video") {
           return options;
@@ -41,6 +45,7 @@ export async function POST(request: Request) {
 
     return Response.json(result);
   } catch (error) {
+    console.warn(`[Blob] upload handler failed: ${error instanceof Error ? error.message : "unknown error"}`);
     return jsonError(error instanceof Error ? error.message : "Blob upload failed.", 400);
   }
 }
@@ -51,7 +56,7 @@ function parseClientPayload(value: string | null) {
   }
 
   try {
-    return JSON.parse(value) as { kind?: string };
+    return JSON.parse(value) as { kind?: string; sizeBytes?: number; contentType?: string };
   } catch {
     return null;
   }
