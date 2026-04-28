@@ -790,31 +790,49 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
           {message ? <p className="muted">{message}</p> : null}
         </section>
 
-        <aside className="surface-card glass doctor-result-card" ref={resultRef}>
-          <div className="doctor-result-scroll">
-            <span className="label">本次结论</span>
-            <h3>这次先改这几件事</h3>
-            <div className="callout warning">
-              <strong>主要问题</strong>
-              <p>{output.mainIssue}</p>
-            </div>
-            {output.evidence ? (
-              <div className="callout">
-                <strong>判断依据</strong>
-                <p>{output.evidence}</p>
+        <aside className="doctor-side-stack" ref={resultRef}>
+          <section className="surface-card glass doctor-result-card">
+            <div className="doctor-result-scroll">
+              <span className="label">本次结论</span>
+              <h3>这次先改这几件事</h3>
+              <div className="callout warning">
+                <strong>主要问题</strong>
+                <p>{output.mainIssue}</p>
               </div>
-            ) : null}
-            <div className="action-bullets">
-              {(output.actions ?? []).map((item) => (
-                <div className="bullet-row" key={item}>
-                  <span className="bullet-dot" />
-                  <span>{item}</span>
+              {output.evidence ? (
+                <div className="callout">
+                  <strong>判断依据</strong>
+                  <p>{output.evidence}</p>
                 </div>
-              ))}
+              ) : null}
+              <div className="action-bullets">
+                {(output.actions ?? []).map((item) => (
+                  <div className="bullet-row" key={item}>
+                    <span className="bullet-dot" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+            <div className="page-actions doctor-result-actions">
+              <Link className="button-primary" href="/director">
+                按结论重写脚本
+              </Link>
+              {session?.writebackCandidates.length ? (
+                <button
+                  className="button-secondary"
+                  disabled={loading}
+                  onClick={writeBack}
+                  type="button"
+                >
+                  保存为复盘规则
+                </button>
+              ) : null}
+            </div>
+          </section>
+
           {session ? (
-            <div className="doctor-followup-card">
+            <section className="surface-card glass doctor-followup-card">
               <div>
                 <strong>继续问 Doctor</strong>
                 <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
@@ -833,23 +851,8 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               >
                 继续分析
               </button>
-            </div>
+            </section>
           ) : null}
-          <div className="page-actions doctor-result-actions">
-            <Link className="button-primary" href="/director">
-              按结论重写脚本
-            </Link>
-            {session?.writebackCandidates.length ? (
-              <button
-                className="button-secondary"
-                disabled={loading}
-                onClick={writeBack}
-                type="button"
-              >
-                保存为复盘规则
-              </button>
-            ) : null}
-          </div>
         </aside>
       </div>
 

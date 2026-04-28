@@ -1172,17 +1172,23 @@ svg {
 }
 
 .doctor-workbench-grid {
-  align-items: stretch;
+  align-items: start;
 }
 
 .doctor-input-card,
-.doctor-result-card {
-  min-height: 100%;
+.doctor-side-stack {
+  align-self: start;
+}
+
+.doctor-side-stack {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+  align-content: start;
 }
 
 .doctor-result-card {
-  display: flex;
-  flex-direction: column;
+  max-height: 640px;
   padding: 0;
   overflow: hidden;
 }
@@ -1190,8 +1196,7 @@ svg {
 .doctor-result-scroll {
   display: grid;
   gap: 14px;
-  flex: 1;
-  min-height: 280px;
+  max-height: 500px;
   padding: 22px 22px 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1216,10 +1221,9 @@ svg {
 .doctor-followup-card {
   display: grid;
   gap: 12px;
-  margin: 0 22px 14px;
-  padding: 14px;
-  border: 1px solid rgba(75, 97, 123, 0.72);
-  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
   background:
     radial-gradient(circle at 18% 18%, rgba(0, 108, 255, 0.12), transparent 42%),
     rgba(192, 203, 216, 0.035);
@@ -1238,7 +1242,7 @@ svg {
 
 .doctor-followup-card textarea {
   width: 100%;
-  min-height: 76px;
+  min-height: 86px;
   padding: 13px 14px;
   resize: vertical;
   border: 1px solid var(--border);
@@ -1251,6 +1255,10 @@ svg {
   border-color: var(--border-strong);
   box-shadow: 0 0 0 4px rgba(0, 108, 255, 0.16);
   outline: none;
+}
+
+.doctor-followup-card .button-secondary {
+  justify-self: start;
 }
 
 .two-column-layout,
