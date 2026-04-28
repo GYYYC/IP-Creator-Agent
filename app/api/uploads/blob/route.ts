@@ -29,7 +29,7 @@ export async function POST(request: Request) {
         };
 
         console.info(
-          `[Blob] token request: kind=${payload?.kind ?? "unknown"} multipart=${multipart} size=${payload?.sizeBytes ?? "unknown"} contentType=${payload?.contentType ?? "unknown"} pathname=${pathname}`
+          `[Blob] token request: client=${payload?.uploadClient ?? "legacy"} kind=${payload?.kind ?? "unknown"} multipart=${multipart} size=${payload?.sizeBytes ?? "unknown"} contentType=${payload?.contentType ?? "unknown"} pathname=${pathname}`
         );
 
         if (payload?.kind === "doctor-video") {
@@ -56,7 +56,12 @@ function parseClientPayload(value: string | null) {
   }
 
   try {
-    return JSON.parse(value) as { kind?: string; sizeBytes?: number; contentType?: string };
+    return JSON.parse(value) as {
+      uploadClient?: string;
+      kind?: string;
+      sizeBytes?: number;
+      contentType?: string;
+    };
   } catch {
     return null;
   }
