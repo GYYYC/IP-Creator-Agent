@@ -17,6 +17,7 @@ const TRANSCRIPTION_TIMEOUT_MS = Number(
   process.env.AI_REQUEST_TIMEOUT_MS ||
   90000
 );
+const TRANSCRIPTION_SOURCE_RETRY_STATUSES = new Set([403, 404, 408, 425, 429, 500, 502, 503, 504]);
 
 function getProvider(): AiProvider {
   if (process.env.AI_PROVIDER === "anthropic") {
@@ -58,6 +59,15 @@ function getTranscriptionApiKey() {
   return process.env.OPENAI_TRANSCRIPTION_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || "";
 }
 
+function hasExplicitTranscriptionConfig() {
+  return Boolean(
+    process.env.OPENAI_TRANSCRIPTION_BASE_URL ||
+      process.env.OPENAI_TRANSCRIPTION_API_KEY ||
+      process.env.OPENAI_TRANSCRIPTION_MODEL ||
+      process.env.AI_TRANSCRIPTION_MODEL
+  );
+}
+
 function getTranscriptionModel() {
   return process.env.OPENAI_TRANSCRIPTION_MODEL || process.env.AI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 }
@@ -85,6 +95,17 @@ function getAudioTranscriptionsUrl() {
   return baseUrl.endsWith("/v1")
     ? `${baseUrl}/audio/transcriptions`
     : `${baseUrl}/v1/audio/transcriptions`;
+}
+
+function canUseTranscriptionEndpoint() {
+  const baseUrl = (
+    process.env.OPENAI_TRANSCRIPTION_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    process.env.AI_BASE_URL ||
+    "https://api.openai.com"
+  ).replace(/\/+$/, "");
+
+  return hasExplicitTranscriptionConfig() || baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1";
 }
 
 function extractJson(text: string) {
@@ -128,6 +149,38 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQU
   }
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchTranscriptionSource(url: string) {
+  const retryDelays = [400, 1000, 2000, 4000];
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "GET",
+        cache: "no-store"
+      },
+      TRANSCRIPTION_TIMEOUT_MS
+    );
+
+    if (
+      response.ok ||
+      !TRANSCRIPTION_SOURCE_RETRY_STATUSES.has(response.status) ||
+      attempt === retryDelays.length
+    ) {
+      return response;
+    }
+
+    response.body?.cancel().catch(() => undefined);
+    await wait(retryDelays[attempt]);
+  }
+
+  throw new Error("unreachable");
+}
+
 export async function transcribeAudioFile(params: {
   file: File;
   language?: string;
@@ -141,6 +194,15 @@ export async function transcribeAudioFile(params: {
       text: "",
       model,
       status: "missing_api_key"
+    };
+  }
+
+  if (!canUseTranscriptionEndpoint()) {
+    console.warn("[AI] transcription skipped: transcription endpoint is not configured.");
+    return {
+      text: "",
+      model,
+      status: "transcription_not_configured"
     };
   }
 
@@ -209,13 +271,7 @@ export async function transcribeAudioUrl(params: {
   language?: string;
 }) {
   try {
-    const response = await fetchWithTimeout(
-      params.url,
-      {
-        method: "GET"
-      },
-      TRANSCRIPTION_TIMEOUT_MS
-    );
+    const response = await fetchTranscriptionSource(params.url);
 
     if (!response.ok) {
       console.warn(

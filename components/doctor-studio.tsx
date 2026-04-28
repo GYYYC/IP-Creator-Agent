@@ -149,7 +149,9 @@ async function postFormData<T>(url: string, body: FormData) {
 
 const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BLOB_MULTIPART_THRESHOLD_BYTES = 25 * 1024 * 1024;
-const BLOB_UPLOAD_TIMEOUT_MS = 60000;
+const BLOB_UPLOAD_MIN_TIMEOUT_MS = 5 * 60 * 1000;
+const BLOB_UPLOAD_MAX_TIMEOUT_MS = 45 * 60 * 1000;
+const BLOB_UPLOAD_TIMEOUT_PER_MB_MS = 3000;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -252,13 +254,26 @@ function isImageFile(file: File) {
 }
 
 function isVideoFile(file: File) {
-  return file.type.startsWith("video/");
+  return file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|avi|mkv|mpeg|mpg)$/i.test(file.name);
 }
 
 function safeUploadPath(fileName: string) {
   const safeName = fileName.replace(/[^\w.\-]+/g, "_");
 
   return `doctor/videos/${Date.now()}-${safeName || "video.mp4"}`;
+}
+
+function blobUploadTimeoutMs(fileSize: number) {
+  const sizeMb = Math.ceil(fileSize / (1024 * 1024));
+
+  return Math.min(
+    BLOB_UPLOAD_MAX_TIMEOUT_MS,
+    Math.max(BLOB_UPLOAD_MIN_TIMEOUT_MS, sizeMb * BLOB_UPLOAD_TIMEOUT_PER_MB_MS)
+  );
+}
+
+function formatMinutes(ms: number) {
+  return Math.max(1, Math.round(ms / 60000));
 }
 
 function countTextUnits(text: string) {
@@ -588,6 +603,7 @@ async function uploadVideoToBlob(
 ): Promise<BlobUploadOutcome> {
   const controller = new AbortController();
   let timeoutId: number | undefined;
+  const timeoutMs = blobUploadTimeoutMs(file.size);
 
   const uploadTask = upload(safeUploadPath(file.name), file, {
     access: "public",
@@ -621,9 +637,9 @@ async function uploadVideoToBlob(
       resolve({
         blob: null,
         status: "timeout",
-        message: "视频上传超过 60 秒，已先按关键画面分析。"
+        message: `视频上传超过 ${formatMinutes(timeoutMs)} 分钟，已先按关键画面分析。`
       });
-    }, BLOB_UPLOAD_TIMEOUT_MS);
+    }, timeoutMs);
   });
 
   try {
@@ -641,9 +657,11 @@ async function transcribeVideoFile(
   blob: BlobUploadResult | null
 ): Promise<VideoTranscript> {
   if (blob?.url) {
+    const sourceUrl = blob.downloadUrl || blob.url;
+
     try {
       return await postJson<VideoTranscript>("/api/doctor/transcribe", {
-        url: blob.url,
+        url: sourceUrl,
         fileName: file.name,
         contentType: file.type,
         durationSeconds
@@ -655,7 +673,7 @@ async function transcribeVideoFile(
         durationSeconds,
         estimatedWordCount: 0,
         status: "request_error",
-        url: blob.url,
+        url: sourceUrl,
         message: error instanceof Error ? error.message : "这次没有拿到口播转写。"
       };
     }
@@ -931,6 +949,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             url: blob.url,
             storageKey: blob.pathname,
             extractedJson: {
+              downloadUrl: blob.downloadUrl,
               durationSeconds: metadata.durationSeconds,
               width: metadata.width,
               height: metadata.height,

@@ -3,8 +3,10 @@ import { jsonError } from "@/lib/agent/http";
 
 export const runtime = "nodejs";
 
+const DEFAULT_MAX_BLOB_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+const CLIENT_TOKEN_TTL_MS = 3 * 60 * 60 * 1000;
 const MAX_BLOB_UPLOAD_BYTES = Number(
-  process.env.BLOB_MAX_UPLOAD_BYTES || 500 * 1024 * 1024
+  process.env.BLOB_MAX_UPLOAD_BYTES || DEFAULT_MAX_BLOB_UPLOAD_BYTES
 );
 
 export async function POST(request: Request) {
@@ -19,21 +21,20 @@ export async function POST(request: Request) {
       request,
       onBeforeGenerateToken: async (_pathname, clientPayload) => {
         const payload = parseClientPayload(clientPayload);
-
-        return {
-          allowedContentTypes:
-            payload?.kind === "doctor-video"
-              ? [
-                  "video/mp4",
-                  "video/webm",
-                  "video/quicktime",
-                  "video/x-m4v",
-                  "application/octet-stream"
-                ]
-              : ["image/*", "video/*", "application/octet-stream"],
+        const options = {
           maximumSizeInBytes: MAX_BLOB_UPLOAD_BYTES,
+          validUntil: Date.now() + CLIENT_TOKEN_TTL_MS,
           addRandomSuffix: true,
           tokenPayload: clientPayload
+        };
+
+        if (payload?.kind === "doctor-video") {
+          return options;
+        }
+
+        return {
+          ...options,
+          allowedContentTypes: ["image/*", "video/*", "application/octet-stream"]
         };
       }
     });
