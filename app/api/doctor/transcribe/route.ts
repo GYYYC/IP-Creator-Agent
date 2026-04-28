@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_TRANSCRIPTION_BYTES = Number(
-  process.env.AI_TRANSCRIPTION_MAX_BYTES || 24 * 1024 * 1024
+  process.env.AI_TRANSCRIPTION_MAX_BYTES || 4 * 1024 * 1024
 );
 
 export async function POST(request: Request) {

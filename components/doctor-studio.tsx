@@ -141,7 +141,7 @@ async function postFormData<T>(url: string, body: FormData) {
   return payload.data;
 }
 
-const TRANSCRIPTION_FILE_LIMIT_BYTES = 24 * 1024 * 1024;
+const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -620,14 +620,14 @@ async function transcribeVideoFile(
     }
   }
 
-  if (file.size > TRANSCRIPTION_FILE_LIMIT_BYTES) {
+  if (file.size > DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES) {
     return {
       fileName: file.name,
       text: "",
       durationSeconds,
       estimatedWordCount: 0,
-      status: "too_large",
-      message: "视频较大，这次先按关键画面和你的说明分析。"
+      status: "blob_upload_failed",
+      message: "视频较大，且这次没有传到 Blob，先按关键画面和你的说明分析。"
     };
   }
 
@@ -893,6 +893,8 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               uploadMode: "vercel_blob"
             }
           });
+        } else if (file.size > DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES) {
+          setMessage(`${file.name} 没有传到 Blob，这次先按关键画面分析。`);
         }
 
         setMessage(`正在识别 ${file.name} 的口播`);

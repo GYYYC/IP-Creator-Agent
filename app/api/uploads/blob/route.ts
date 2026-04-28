@@ -1,5 +1,5 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
-import { jsonError, jsonOk } from "@/lib/agent/http";
+import { jsonError } from "@/lib/agent/http";
 
 export const runtime = "nodejs";
 
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       }
     });
 
-    return jsonOk(result);
+    return Response.json(result);
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Blob upload failed.", 400);
   }
