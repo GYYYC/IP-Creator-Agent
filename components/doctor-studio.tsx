@@ -98,27 +98,27 @@ const MODE_CONFIG: Record<
   graphic: {
     label: "图文",
     title: "把这篇图文的材料给我",
-    contentLabel: "上传图文内容",
-    contentHint: "首图、正文截图、标题页都可以放进来。",
+    contentLabel: "上传图文素材",
+    contentHint: "首图、正文截图、标题页都可以先放进来。",
     contentAccept: "image/*,.txt,.md,.pdf",
-    dataLabel: "上传图文数据截图",
-    dataHint: "浏览、点赞、收藏、评论数据都可以。",
+    dataLabel: "上传数据截图（可选）",
+    dataHint: "浏览、点赞、收藏、评论数据有就补充。",
     statsPlaceholder: "例如：浏览 1.8w，点赞 900，收藏 680，评论 96，收藏率高但评论少",
-    notesLabel: "图文结构和数据说明",
-    notesPlaceholder: "例如：首图讲失败经历，第二屏才给方法；收藏不错，但评论主要在问模板。",
+    notesLabel: "想让 Doctor 看哪里",
+    notesPlaceholder: "例如：帮我看首图有没有把价值讲清楚；第二屏开始讲经历，会不会太慢；结尾评论引导够不够具体。",
     resultLabel: "结构记录"
   },
   video: {
     label: "视频",
     title: "把这条视频的材料给我",
-    contentLabel: "上传视频或关键帧",
-    contentHint: "用于对齐开头、转折和方法段。",
+    contentLabel: "上传视频素材",
+    contentHint: "原片、片段、关键帧都可以先放进来。",
     contentAccept: "video/*,image/*",
-    dataLabel: "上传留存曲线截图",
-    dataHint: "用于定位掉点和回升的位置。",
+    dataLabel: "上传留存曲线（可选）",
+    dataHint: "有留存曲线就放，没有也可以只写说明。",
     statsPlaceholder: "例如：播放 2.1w，点赞 1.2k，收藏 420，评论 138，完播率 24%",
-    notesLabel: "留存截图和关键时间点说明",
-    notesPlaceholder: "例如：15 秒左右留存从 72% 掉到 41%，当时正在讲失败后的背景。",
+    notesLabel: "想让 Doctor 看哪里",
+    notesPlaceholder: "例如：帮我看前 3 秒能不能抓住人；20 秒开始讲方法会不会太晚；结尾想引导评论但不想太硬。",
     resultLabel: "时间轴"
   }
 };
@@ -131,6 +131,15 @@ function fileNames(files: File[]) {
   return files.map((file) => file.name);
 }
 
+function hasDoctorOutput(output: DoctorOutput | undefined) {
+  return Boolean(
+    output?.mainIssue ||
+      output?.evidence ||
+      output?.timeline?.length ||
+      output?.actions?.length
+  );
+}
+
 export function DoctorStudio({ initialSessionId }: { initialSessionId?: string } = {}) {
   const [mode, setMode] = useState<ContentMode>("video");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
@@ -141,7 +150,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const config = MODE_CONFIG[mode];
-  const output = session?.output ?? fallbackOutput;
+  const output = hasDoctorOutput(session?.output) ? session!.output : fallbackOutput;
   const canAnalyze = stats.trim() || notes.trim() || contentFiles.length > 0 || dataFiles.length > 0;
 
   useEffect(() => {
@@ -247,6 +256,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
         input: {
           stats,
           notes,
+          analysisFocus: notes,
           sourceType: mode === "graphic" ? "图文复盘" : "视频复盘",
           contentFileNames: fileNames(contentFiles),
           dataFileNames: fileNames(dataFiles)
@@ -362,6 +372,11 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               rows={5}
               value={notes}
             />
+            <p className="field-hint">
+              {mode === "video"
+                ? "没有留存曲线也可以，写清楚你想看的片段、开头、转折、方法段或结尾。"
+                : "可以只写你想看的首图、正文、标题、评论引导或转化问题。"}
+            </p>
           </div>
           <button
             className="button-primary"

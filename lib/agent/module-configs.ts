@@ -192,7 +192,14 @@ comment_direction:
   }
 
   if (module === "doctor") {
-    return `${shared} 当前模块是 Doctor。你需要根据 session.contentMode 判断复盘对象是图文还是视频。图文重点分析首图、标题、正文结构、收藏/评论转化；视频重点基于用户补充、留存截图说明和关键时间点做半自动复盘。不要声称已逐秒自动理解完整视频。`;
+    return `${shared} 当前模块是 Doctor。你需要根据 session.contentMode 判断复盘对象是图文还是视频。
+硬性规则：
+1. 必须输出完整 Doctor 结果，output 必须包含 mainIssue、evidence、timeline、actions。
+2. 如果用户只上传视频或图文文件，你只能把文件名当作素材线索，不得声称已经看完、听完、逐帧分析或自动理解了完整视频/图文。
+3. 用户可以不提供留存曲线。没有留存曲线时，必须基于 notes、analysisFocus、stats、文件名和用户描述分析其指定的开头、转折、方法段、首图、正文、标题或结尾。
+4. 如果 notes 或 analysisFocus 写了“帮我看某一段/某一屏/某个问题”，必须围绕该位置给结论，不要强行改成留存曲线分析。
+5. 所有页面文案面向用户当前作品，不要说“系统”“模块”“我无法分析文件”。可以温和说明“这次先按你写的说明判断”。
+图文重点分析首图、标题、正文结构、收藏/评论转化；视频重点分析开头停留、信息进入速度、转折、方法段、结尾动作。`;
   }
 
   return `${shared} 当前模块是 Profile。你需要把用户主动提供的信息整理成可复用画像候选。`;
@@ -924,10 +931,26 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
 
 function buildDoctorFallback(session: AgentSession): AgentRunResult {
   const isGraphic = session.contentMode === "graphic";
-  const notes = asString(
-    session.input.notes,
-    isGraphic ? "首图先讲背景，第二屏才进入方法，收藏高但评论少。" : "15 秒后开始讲背景，留存下降明显。"
+  const focus = asString(session.input.analysisFocus, asString(session.input.notes));
+  const stats = asString(session.input.stats);
+  const contentFileNames = normalizeStringArray(session.input.contentFileNames).filter(
+    (name) => name !== "还没有选择文件"
   );
+  const dataFileNames = normalizeStringArray(session.input.dataFileNames).filter(
+    (name) => name !== "还没有选择文件"
+  );
+  const notes = asString(
+    focus,
+    isGraphic
+      ? "这次先按图文素材检查首图、正文进入速度和结尾互动。"
+      : "这次先按视频素材检查开头停留、信息进入速度和结尾动作。"
+  );
+  const evidence = [
+    notes,
+    stats ? `关键数据：${stats}` : "",
+    contentFileNames.length ? `作品素材：${contentFileNames.join("、")}` : "",
+    dataFileNames.length ? `数据素材：${dataFileNames.join("、")}` : ""
+  ].filter(Boolean).join("\n");
   const candidate: MemoryCandidate = {
     category: "performance_pattern",
     key: isGraphic ? "graphic_late_value_drop" : "early_context_drop",
@@ -950,8 +973,10 @@ function buildDoctorFallback(session: AgentSession): AgentRunResult {
     draft: {},
     output: isGraphic
       ? {
-          mainIssue: "价值点出现偏晚，读者要滑到第二屏后才知道这篇为什么值得收藏。",
-          evidence: notes,
+          mainIssue: focus
+            ? "当前最需要先确认首屏价值和正文进入速度，避免读者还没看到重点就划走。"
+            : "价值点出现偏晚，读者要滑到第二屏后才知道这篇为什么值得收藏。",
+          evidence,
           timeline: [
             { label: "首图", title: "判断不够快", description: "首屏需要先给结论、模板或结果，不要先铺长经历。" },
             { label: "正文前段", title: "方法进入偏慢", description: "经历可以保留，但要压成一句后马上给动作。" },
@@ -960,12 +985,14 @@ function buildDoctorFallback(session: AgentSession): AgentRunResult {
           actions: ["首图先给可收藏结论", "正文前三段直接给步骤", "经历压缩成一句证明可信度", "结尾问一个具体问题"]
         }
       : {
-          mainIssue: "前 15 秒后信息密度下降，背景铺陈让观众流失。",
-          evidence: notes,
+          mainIssue: focus
+            ? "当前最该先检查开头承诺和方法进入速度，避免观众听完开场还不知道继续看的理由。"
+            : "前 15 秒后信息密度下降，背景铺陈让观众流失。",
+          evidence,
           timeline: [
-            { label: "0s - 5s", title: "身份建立", description: "真实经历能建立信任。" },
-            { label: "15s - 22s", title: "明显掉点", description: "开始铺背景后信息密度下降。" },
-            { label: "28s - 45s", title: "方法段回升", description: "具体动作出现后更适合保留。" }
+            { label: "开头", title: "先给继续看的理由", description: "前几秒要先抛出这条视频能解决的具体处境，不要只交代背景。" },
+            { label: "转折", title: "经历要服务于判断", description: "经历可以留下，但要快速落到观众此刻正在卡住的问题。" },
+            { label: "方法段", title: "动作要早点出现", description: "如果用户想看方法段，建议尽早给出 2 到 3 个可执行动作。" }
           ],
           actions: ["把结论提前到前 8 秒", "背景只保留一句", "方法部分改成 3 个短动作", "结尾引导评论区说出卡点"]
         },
