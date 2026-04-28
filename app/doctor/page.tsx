@@ -24,9 +24,9 @@ export default async function DoctorPage({ searchParams }: PageProps) {
           description="先上传内容和数据，再直接看修改方向。"
           actions={
             <>
-              <Link className="button-primary" href="/director">
-                按结论重写脚本
-              </Link>
+              <a className="button-primary" href="#doctor-input">
+                开始复盘
+              </a>
               <Link className="button-secondary" href="/assistant">
                 去处理评论区
               </Link>

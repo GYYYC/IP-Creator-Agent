@@ -12,6 +12,11 @@ const DEFAULT_BASE_URL =
   process.env.ANTHROPIC_BASE_URL ||
   "https://api.openai.com";
 const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 25000);
+const TRANSCRIPTION_TIMEOUT_MS = Number(
+  process.env.AI_TRANSCRIPTION_TIMEOUT_MS ||
+  process.env.AI_REQUEST_TIMEOUT_MS ||
+  90000
+);
 
 function getProvider(): AiProvider {
   if (process.env.AI_PROVIDER === "anthropic") {
@@ -49,6 +54,14 @@ function getApiKey() {
   );
 }
 
+function getTranscriptionApiKey() {
+  return process.env.OPENAI_TRANSCRIPTION_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || "";
+}
+
+function getTranscriptionModel() {
+  return process.env.OPENAI_TRANSCRIPTION_MODEL || process.env.AI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
+}
+
 function getChatCompletionsUrl() {
   const baseUrl = DEFAULT_BASE_URL.replace(/\/+$/, "");
   return baseUrl.endsWith("/v1")
@@ -59,6 +72,19 @@ function getChatCompletionsUrl() {
 function getMessagesUrl() {
   const baseUrl = DEFAULT_BASE_URL.replace(/\/+$/, "");
   return baseUrl.endsWith("/v1") ? `${baseUrl}/messages` : `${baseUrl}/v1/messages`;
+}
+
+function getAudioTranscriptionsUrl() {
+  const baseUrl = (
+    process.env.OPENAI_TRANSCRIPTION_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    process.env.AI_BASE_URL ||
+    "https://api.openai.com"
+  ).replace(/\/+$/, "");
+
+  return baseUrl.endsWith("/v1")
+    ? `${baseUrl}/audio/transcriptions`
+    : `${baseUrl}/v1/audio/transcriptions`;
 }
 
 function extractJson(text: string) {
@@ -88,9 +114,9 @@ function parseDataUrl(dataUrl: string) {
   };
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit) {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(url, {
@@ -99,6 +125,80 @@ async function fetchWithTimeout(url: string, init: RequestInit) {
     });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function transcribeAudioFile(params: {
+  file: File;
+  language?: string;
+}) {
+  const apiKey = getTranscriptionApiKey();
+  const model = getTranscriptionModel();
+
+  if (!apiKey) {
+    console.warn("[AI] transcription skipped: missing transcription API key.");
+    return {
+      text: "",
+      model,
+      status: "missing_api_key"
+    };
+  }
+
+  const formData = new FormData();
+  formData.append("file", params.file, params.file.name);
+  formData.append("model", model);
+  formData.append("response_format", "json");
+
+  if (params.language) {
+    formData.append("language", params.language);
+  }
+
+  const url = getAudioTranscriptionsUrl();
+
+  try {
+    console.info(
+      `[AI] transcribing audio: model=${model} bytes=${params.file.size} url=${url}`
+    );
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: formData
+      },
+      TRANSCRIPTION_TIMEOUT_MS
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(
+        `[AI] transcription failed: status=${response.status} model=${model} body=${errorText.slice(0, 500)}`
+      );
+      return {
+        text: "",
+        model,
+        status: `request_failed_${response.status}`
+      };
+    }
+
+    const data = (await response.json()) as { text?: string };
+
+    return {
+      text: typeof data.text === "string" ? data.text.trim() : "",
+      model,
+      status: data.text ? "ok" : "empty_response"
+    };
+  } catch (error) {
+    console.warn(
+      `[AI] transcription error: model=${model} ${error instanceof Error ? error.message : "unknown error"}`
+    );
+    return {
+      text: "",
+      model,
+      status: "request_error"
+    };
   }
 }
 

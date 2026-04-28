@@ -1261,6 +1261,100 @@ svg {
   justify-self: start;
 }
 
+.doctor-script-card,
+.doctor-transcript-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.doctor-script-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 22px 22px 0;
+}
+
+.doctor-script-head h3,
+.doctor-transcript-card h3 {
+  margin-top: 6px;
+}
+
+.doctor-script-scroll,
+.doctor-transcript-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.doctor-script-scroll {
+  display: grid;
+  gap: 14px;
+  padding: 16px 22px 18px;
+}
+
+.doctor-transcript-scroll {
+  display: grid;
+  gap: 14px;
+  max-height: 220px;
+  padding: 16px 22px 22px;
+}
+
+.doctor-script-scroll::-webkit-scrollbar,
+.doctor-transcript-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.doctor-script-scroll::-webkit-scrollbar-thumb,
+.doctor-transcript-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(154, 197, 255, 0.22);
+}
+
+.doctor-script-scroll pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-strong);
+  font: inherit;
+  line-height: 1.78;
+}
+
+.doctor-script-segments {
+  display: grid;
+  gap: 10px;
+}
+
+.doctor-script-segments .callout p,
+.doctor-transcript-scroll p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
+.doctor-script-segments .callout span {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.doctor-transcript-card {
+  padding-top: 22px;
+}
+
+.doctor-transcript-card > .label,
+.doctor-transcript-card > h3 {
+  margin-left: 22px;
+  margin-right: 22px;
+}
+
+.doctor-transcript-scroll strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-strong);
+}
+
 .two-column-layout,
 .profile-edit-grid,
 .analysis-grid,

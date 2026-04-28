@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
@@ -10,6 +9,15 @@ type DoctorOutput = {
   evidence?: string;
   timeline?: Array<{ label: string; title: string; description: string }>;
   actions?: string[];
+  rewrittenScript?: {
+    title?: string;
+    body?: string;
+    targetDurationSeconds?: number;
+    targetWordCountRange?: string;
+    estimatedWordCount?: number;
+    segments?: Array<{ label?: string; script?: string; note?: string }>;
+    revisionNotes?: string[];
+  } | null;
   _aiStatus?: string;
 };
 
@@ -38,6 +46,7 @@ type ArtifactRegistrationInput = {
   mimeType: string;
   fileName: string;
   sizeBytes?: number;
+  extractedText?: string;
   extractedJson?: Record<string, unknown>;
 };
 
@@ -50,6 +59,31 @@ type FrameTimePlan = {
   source: "user" | "retention" | "duration";
   times: number[];
   reason?: string;
+};
+
+type VideoMetadata = {
+  fileName: string;
+  durationSeconds: number;
+  width: number;
+  height: number;
+};
+
+type VideoTranscript = {
+  fileName: string;
+  text: string;
+  durationSeconds: number;
+  estimatedWordCount: number;
+  status: string;
+  message?: string;
+};
+
+type ScriptLengthGuide = {
+  basis: "transcript" | "duration" | "unknown";
+  targetDurationSeconds: number;
+  originalWordCount: number;
+  minWordCount: number;
+  maxWordCount: number;
+  instruction: string;
 };
 
 type ApiResponse<T> =
@@ -81,6 +115,22 @@ async function fetchJson<T>(url: string) {
 
   return payload.data;
 }
+
+async function postFormData<T>(url: string, body: FormData) {
+  const response = await fetch(url, {
+    method: "POST",
+    body
+  });
+  const payload = (await response.json()) as ApiResponse<T>;
+
+  if (!payload.ok) {
+    throw new Error(payload.error);
+  }
+
+  return payload.data;
+}
+
+const TRANSCRIPTION_FILE_LIMIT_BYTES = 24 * 1024 * 1024;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -184,6 +234,120 @@ function isImageFile(file: File) {
 
 function isVideoFile(file: File) {
   return file.type.startsWith("video/");
+}
+
+function countTextUnits(text: string) {
+  const cjkCount = text.match(/[\u3400-\u9fff]/g)?.length ?? 0;
+  const latinCount = text
+    .replace(/[\u3400-\u9fff]/g, " ")
+    .match(/[A-Za-z0-9]+/g)?.length ?? 0;
+
+  return cjkCount + latinCount;
+}
+
+function estimateWordRangeFromDuration(durationSeconds: number) {
+  const duration = Math.max(0, durationSeconds);
+
+  if (!duration) {
+    return {
+      minWordCount: 220,
+      maxWordCount: 320
+    };
+  }
+
+  return {
+    minWordCount: Math.max(80, Math.round(duration * 3.7)),
+    maxWordCount: Math.max(120, Math.round(duration * 5.3))
+  };
+}
+
+function buildScriptLengthGuide(params: {
+  videoMetadata: VideoMetadata[];
+  transcripts: VideoTranscript[];
+}): ScriptLengthGuide {
+  const usableTranscripts = params.transcripts.filter((item) => item.text.trim());
+  const transcriptWordCount = usableTranscripts.reduce(
+    (total, item) => total + (item.estimatedWordCount || countTextUnits(item.text)),
+    0
+  );
+  const targetDurationSeconds =
+    usableTranscripts.reduce((total, item) => total + item.durationSeconds, 0) ||
+    params.videoMetadata.reduce((total, item) => total + item.durationSeconds, 0);
+
+  if (transcriptWordCount) {
+    return {
+      basis: "transcript",
+      targetDurationSeconds,
+      originalWordCount: transcriptWordCount,
+      minWordCount: Math.max(80, Math.round(transcriptWordCount * 0.85)),
+      maxWordCount: Math.max(120, Math.round(transcriptWordCount * 1.15)),
+      instruction: "优先贴近原口播字数，上下浮动不超过 15%。"
+    };
+  }
+
+  if (targetDurationSeconds) {
+    const range = estimateWordRangeFromDuration(targetDurationSeconds);
+
+    return {
+      basis: "duration",
+      targetDurationSeconds,
+      originalWordCount: 0,
+      minWordCount: range.minWordCount,
+      maxWordCount: range.maxWordCount,
+      instruction: "没有口播稿时，按视频时长估算脚本字数。"
+    };
+  }
+
+  return {
+    basis: "unknown",
+    targetDurationSeconds: 60,
+    originalWordCount: 0,
+    minWordCount: 220,
+    maxWordCount: 320,
+    instruction: "素材没有明确时长时，按一条 60 秒短视频控制篇幅。"
+  };
+}
+
+function getSessionTranscripts(session: ApiSession | null): VideoTranscript[] {
+  const value = session?.input?.audioTranscripts;
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item): VideoTranscript | null => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const text = typeof record.text === "string" ? record.text.trim() : "";
+
+      if (!text) {
+        return null;
+      }
+
+      return {
+        fileName: typeof record.fileName === "string" ? record.fileName : "视频口播",
+        text,
+        durationSeconds:
+          typeof record.durationSeconds === "number" ? record.durationSeconds : 0,
+        estimatedWordCount:
+          typeof record.estimatedWordCount === "number"
+            ? record.estimatedWordCount
+            : countTextUnits(text),
+        status: typeof record.status === "string" ? record.status : "ok",
+        message: typeof record.message === "string" ? record.message : undefined
+      };
+    })
+    .filter((item): item is VideoTranscript => Boolean(item));
+}
+
+function getScriptBody(output: DoctorOutput) {
+  return typeof output.rewrittenScript?.body === "string"
+    ? output.rewrittenScript.body.trim()
+    : "";
 }
 
 async function fileToVisualDataUrl(file: File) {
@@ -368,6 +532,63 @@ async function resolveFrameTimePlan(params: {
   } satisfies FrameTimePlan;
 }
 
+async function readVideoMetadata(file: File): Promise<VideoMetadata> {
+  const video = document.createElement("video");
+  const objectUrl = URL.createObjectURL(file);
+  video.src = objectUrl;
+  video.muted = true;
+  video.preload = "metadata";
+  video.playsInline = true;
+
+  try {
+    await waitForMediaEvent(video, "loadedmetadata");
+
+    return {
+      fileName: file.name,
+      durationSeconds: Number.isFinite(video.duration) ? video.duration : 0,
+      width: video.videoWidth || 0,
+      height: video.videoHeight || 0
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+async function transcribeVideoFile(
+  file: File,
+  durationSeconds: number
+): Promise<VideoTranscript> {
+  if (file.size > TRANSCRIPTION_FILE_LIMIT_BYTES) {
+    return {
+      fileName: file.name,
+      text: "",
+      durationSeconds,
+      estimatedWordCount: 0,
+      status: "too_large",
+      message: "视频较大，这次先按关键画面和你的说明分析。"
+    };
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    formData.append("durationSeconds", String(durationSeconds || 0));
+
+    return await postFormData<VideoTranscript>("/api/doctor/transcribe", formData);
+  } catch (error) {
+    return {
+      fileName: file.name,
+      text: "",
+      durationSeconds,
+      estimatedWordCount: 0,
+      status: "request_error",
+      message: error instanceof Error ? error.message : "这次没有拿到口播转写。"
+    };
+  }
+}
+
 async function extractVideoFrameArtifacts(
   file: File,
   params: {
@@ -457,6 +678,8 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [message, setMessage] = useState("");
   const config = MODE_CONFIG[mode];
   const output = hasDoctorOutput(session?.output) ? session!.output : fallbackOutput;
+  const scriptBody = getScriptBody(output);
+  const transcripts = getSessionTranscripts(session);
   const canAnalyze = stats.trim() || notes.trim() || contentFiles.length > 0 || dataFiles.length > 0;
 
   useEffect(() => {
@@ -552,6 +775,8 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       const artifactPayloads: ArtifactRegistrationInput[] = [];
       const retentionImages: RetentionImageInput[] = [];
       const videoFiles: File[] = [];
+      const videoMetadata: VideoMetadata[] = [];
+      const audioTranscripts: VideoTranscript[] = [];
 
       for (const { file, kind, visualRole } of artifactInputs) {
         const visualDataUrl = await fileToVisualDataUrl(file);
@@ -581,6 +806,34 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       }
 
       for (const file of videoFiles) {
+        setMessage(`正在读取 ${file.name} 的时长`);
+        const metadata = await readVideoMetadata(file).catch(() => ({
+          fileName: file.name,
+          durationSeconds: 0,
+          width: 0,
+          height: 0
+        }));
+        videoMetadata.push(metadata);
+
+        setMessage(`正在识别 ${file.name} 的口播`);
+        const transcript = await transcribeVideoFile(file, metadata.durationSeconds);
+        audioTranscripts.push(transcript);
+
+        if (transcript.text.trim()) {
+          artifactPayloads.push({
+            kind: "text",
+            mimeType: "text/plain",
+            fileName: `${file.name} 口播稿.txt`,
+            extractedText: transcript.text,
+            extractedJson: {
+              sourceFileName: file.name,
+              transcriptStatus: transcript.status,
+              durationSeconds: metadata.durationSeconds,
+              estimatedWordCount: transcript.estimatedWordCount
+            }
+          });
+        }
+
         setMessage(`正在提取 ${file.name} 的关键画面`);
         artifactPayloads.push(
           ...(await extractVideoFrameArtifacts(file, {
@@ -607,7 +860,13 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
           analysisFocus: notes,
           sourceType: mode === "graphic" ? "图文复盘" : "视频复盘",
           contentFileNames: fileNames(contentFiles),
-          dataFileNames: fileNames(dataFiles)
+          dataFileNames: fileNames(dataFiles),
+          videoMetadata,
+          audioTranscripts,
+          scriptLengthGuide: buildScriptLengthGuide({
+            videoMetadata,
+            transcripts: audioTranscripts
+          })
         }
       });
       const run = await postJson<{ session: ApiSession }>(
@@ -674,6 +933,66 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
     }
   }
 
+  async function handleRewriteScript() {
+    if (!session?.id) {
+      return;
+    }
+
+    const guide = session.input?.scriptLengthGuide as ScriptLengthGuide | undefined;
+    const range = guide
+      ? `${guide.minWordCount}-${guide.maxWordCount} 字`
+      : "尽量和原作品字数一致";
+    const answer = [
+      "按本次诊断结论直接重写这条作品。",
+      `字数要求：${range}，不要明显长于原作品。`,
+      "如果有口播稿，保留原视频主旨和核心表达，不要换成另一个选题。",
+      "输出一版可以直接拍摄或发布的完整脚本。"
+    ].join("\n");
+
+    setLoading(true);
+    setMessage("正在重写脚本");
+    try {
+      await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/respond`, {
+        answer,
+        kind: "revision"
+      });
+      const run = await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/run`);
+      const nextSession = hasDoctorOutput(run.session.output)
+        ? run.session
+        : {
+            ...run.session,
+            output: session.output
+          };
+
+      setSession(nextSession);
+      setMessage(
+        getScriptBody(run.session.output)
+          ? "脚本已重写"
+          : "这次没有返回完整脚本，先保留诊断结论。"
+      );
+      window.requestAnimationFrame(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重写失败，请再试一次。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function copyScript() {
+    if (!scriptBody) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(scriptBody);
+      setMessage("脚本已复制");
+    } catch {
+      setMessage("复制失败，可以直接选中脚本文本。");
+    }
+  }
+
   async function writeBack() {
     if (!session?.id) {
       return;
@@ -693,7 +1012,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   return (
     <>
       <div className="task-dashboard-grid doctor-workbench-grid">
-        <section className="surface-card glass doctor-input-card">
+        <section className="surface-card glass doctor-input-card" id="doctor-input">
           <span className="label">输入</span>
           <h3>{config.title}</h3>
           <div className="mode-switch">
@@ -815,9 +1134,14 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               </div>
             </div>
             <div className="page-actions doctor-result-actions">
-              <Link className="button-primary" href="/director">
+              <button
+                className="button-primary"
+                disabled={!session?.id || loading}
+                onClick={handleRewriteScript}
+                type="button"
+              >
                 按结论重写脚本
-              </Link>
+              </button>
               {session?.writebackCandidates.length ? (
                 <button
                   className="button-secondary"
@@ -830,6 +1154,56 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               ) : null}
             </div>
           </section>
+
+          {scriptBody ? (
+            <section className="surface-card glass doctor-script-card">
+              <div className="doctor-script-head">
+                <div>
+                  <span className="label">重写稿</span>
+                  <h3>{output.rewrittenScript?.title || "这一版脚本"}</h3>
+                </div>
+                {output.rewrittenScript?.targetWordCountRange ? (
+                  <span className="status-badge">
+                    {output.rewrittenScript.targetWordCountRange}
+                  </span>
+                ) : null}
+              </div>
+              <div className="doctor-script-scroll">
+                {output.rewrittenScript?.segments?.length ? (
+                  <div className="doctor-script-segments">
+                    {output.rewrittenScript.segments.map((segment, index) => (
+                      <div className="callout" key={`${segment.label || "segment"}-${index}`}>
+                        <strong>{segment.label || `第 ${index + 1} 段`}</strong>
+                        <p>{segment.script}</p>
+                        {segment.note ? <span>{segment.note}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <pre>{scriptBody}</pre>
+              </div>
+              <div className="page-actions doctor-result-actions">
+                <button className="button-secondary" onClick={copyScript} type="button">
+                  复制脚本
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {transcripts.length ? (
+            <section className="surface-card glass doctor-transcript-card">
+              <span className="label">口播稿</span>
+              <h3>识别到的原视频内容</h3>
+              <div className="doctor-transcript-scroll">
+                {transcripts.map((transcript) => (
+                  <div key={transcript.fileName}>
+                    <strong>{transcript.fileName}</strong>
+                    <p>{transcript.text}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {session ? (
             <section className="surface-card glass doctor-followup-card">
