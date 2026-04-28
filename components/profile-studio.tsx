@@ -1,12 +1,26 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { creatorMemory, profileAssetInsights } from "@/lib/demo-data";
 
 type AssetMode = "graphic" | "video";
+type ProfileForm = {
+  role: string;
+  story: string;
+  audience: string;
+  tone: string;
+};
 type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+type ProfilePayload = {
+  profile: {
+    identity?: Record<string, unknown>;
+    audience?: Record<string, unknown>;
+    style?: Record<string, unknown>;
+  };
+};
 
 const ASSET_MODE_CONFIG: Record<
   AssetMode,
@@ -48,6 +62,13 @@ function fileNames(files: File[]) {
   return files.map((file) => file.name);
 }
 
+const DEFAULT_PROFILE_FORM: ProfileForm = {
+  role: "我是二战上岸的人，不是天赋型选手，但我很擅长把复杂备考拆成普通人能执行的步骤。",
+  story: "从崩溃式备考到重新建立节奏，这段经历最能代表我。",
+  audience: "基础一般、容易焦虑、节奏总是断掉的考研人。",
+  tone: "有方法、稳、愿意陪着走一段，但不会高高在上。"
+};
+
 async function postJson<T>(url: string, body?: Record<string, unknown>) {
   const response = await fetch(url, {
     method: "POST",
@@ -63,17 +84,83 @@ async function postJson<T>(url: string, body?: Record<string, unknown>) {
   return payload.data;
 }
 
+async function patchJson<T>(url: string, body?: Record<string, unknown>) {
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const payload = (await response.json()) as ApiResponse<T>;
+
+  if (!payload.ok) {
+    throw new Error(payload.error);
+  }
+
+  return payload.data;
+}
+
+async function fetchJson<T>(url: string) {
+  const response = await fetch(url);
+  const payload = (await response.json()) as ApiResponse<T>;
+
+  if (!payload.ok) {
+    throw new Error(payload.error);
+  }
+
+  return payload.data;
+}
+
+function profileFormFromPayload(payload: ProfilePayload): ProfileForm {
+  const identity = payload.profile.identity ?? {};
+  const audience = payload.profile.audience ?? {};
+  const style = payload.profile.style ?? {};
+
+  return {
+    role: typeof identity.role === "string" ? identity.role : DEFAULT_PROFILE_FORM.role,
+    story: typeof identity.proof === "string" ? identity.proof : DEFAULT_PROFILE_FORM.story,
+    audience: typeof audience.target === "string" ? audience.target : DEFAULT_PROFILE_FORM.audience,
+    tone: typeof style.tone === "string" ? style.tone : DEFAULT_PROFILE_FORM.tone
+  };
+}
+
 export function ProfileStudio() {
+  const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE_FORM);
   const [assetMode, setAssetMode] = useState<AssetMode>("video");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
   const [supportFiles, setSupportFiles] = useState<File[]>([]);
   const [analysisApplied, setAnalysisApplied] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
   const [message, setMessage] = useState("");
 
   const config = ASSET_MODE_CONFIG[assetMode];
   const insights = profileAssetInsights[assetMode];
   const canAnalyze = contentFiles.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      try {
+        const payload = await fetchJson<ProfilePayload>("/api/profile");
+
+        if (!cancelled) {
+          setProfileForm(profileFormFromPayload(payload));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProfileMessage(error instanceof Error ? error.message : "画像暂时没有读取成功。");
+        }
+      }
+    }
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedSummary = useMemo(
     () => [
@@ -107,6 +194,41 @@ export function ProfileStudio() {
     setContentFiles([]);
     setSupportFiles([]);
     setAnalysisApplied(false);
+  }
+
+  function updateProfileField(field: keyof ProfileForm, value: string) {
+    setProfileMessage("");
+    setProfileForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  async function saveProfileBasics() {
+    setSavingProfile(true);
+    setProfileMessage("");
+
+    try {
+      const payload = await patchJson<ProfilePayload>("/api/profile", {
+        identity: {
+          role: profileForm.role,
+          proof: profileForm.story
+        },
+        audience: {
+          target: profileForm.audience
+        },
+        style: {
+          tone: profileForm.tone
+        }
+      });
+
+      setProfileForm(profileFormFromPayload(payload));
+      setProfileMessage("已保存画像。");
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : "保存失败，请稍后再试。");
+    } finally {
+      setSavingProfile(false);
+    }
   }
 
   async function analyzeAndWriteBack() {
@@ -160,34 +282,49 @@ export function ProfileStudio() {
           <div className="input-group">
             <label htmlFor="profile-role">最想让别人先记住你什么</label>
             <textarea
-              defaultValue="我是二战上岸的人，不是天赋型选手，但我很擅长把复杂备考拆成普通人能执行的步骤。"
               id="profile-role"
+              onChange={(event) => updateProfileField("role", event.target.value)}
               rows={5}
+              value={profileForm.role}
             />
           </div>
           <div className="input-group">
             <label htmlFor="profile-story">最值得讲的经历</label>
             <textarea
-              defaultValue="从崩溃式备考到重新建立节奏，这段经历最能代表我。"
               id="profile-story"
+              onChange={(event) => updateProfileField("story", event.target.value)}
               rows={5}
+              value={profileForm.story}
             />
           </div>
           <div className="input-group">
             <label htmlFor="profile-audience">你最想帮助哪类人</label>
             <textarea
-              defaultValue="基础一般、容易焦虑、节奏总是断掉的考研人。"
               id="profile-audience"
+              onChange={(event) => updateProfileField("audience", event.target.value)}
               rows={5}
+              value={profileForm.audience}
             />
           </div>
           <div className="input-group">
             <label htmlFor="profile-tone">别人应该从你这里感受到什么</label>
             <textarea
-              defaultValue="有方法、稳、愿意陪着走一段，但不会高高在上。"
               id="profile-tone"
+              onChange={(event) => updateProfileField("tone", event.target.value)}
               rows={5}
+              value={profileForm.tone}
             />
+          </div>
+          <div className="page-actions">
+            <button
+              className="button-primary"
+              disabled={savingProfile}
+              onClick={saveProfileBasics}
+              type="button"
+            >
+              {savingProfile ? "正在保存" : "保存画像"}
+            </button>
+            {profileMessage ? <span className="muted">{profileMessage}</span> : null}
           </div>
         </section>
 
