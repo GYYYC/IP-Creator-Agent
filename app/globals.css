@@ -1171,6 +1171,76 @@ svg {
   align-items: start;
 }
 
+.doctor-result-card {
+  max-height: 640px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.doctor-result-scroll {
+  display: grid;
+  gap: 14px;
+  max-height: 500px;
+  padding: 22px 22px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.doctor-result-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.doctor-result-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(154, 197, 255, 0.22);
+}
+
+.doctor-result-actions {
+  padding: 14px 22px 22px;
+  border-top: 1px solid var(--border);
+  background: rgba(5, 8, 13, 0.32);
+}
+
+.doctor-followup-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(0, 108, 255, 0.12), transparent 42%),
+    rgba(192, 203, 216, 0.035);
+}
+
+.doctor-followup-card strong {
+  color: var(--text-strong);
+}
+
+.doctor-followup-card p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.doctor-followup-card textarea {
+  width: 100%;
+  min-height: 86px;
+  padding: 13px 14px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(5, 8, 13, 0.68);
+  color: var(--text-strong);
+}
+
+.doctor-followup-card textarea:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 4px rgba(0, 108, 255, 0.16);
+  outline: none;
+}
+
 .two-column-layout,
 .profile-edit-grid,
 .analysis-grid,

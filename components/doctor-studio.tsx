@@ -451,6 +451,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [dataFiles, setDataFiles] = useState<File[]>([]);
   const [stats, setStats] = useState("");
   const [notes, setNotes] = useState("");
+  const [followup, setFollowup] = useState("");
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -634,6 +635,45 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
     }
   }
 
+  async function handleFollowup() {
+    const answer = followup.trim();
+
+    if (!session?.id || !answer) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage("正在继续分析");
+    try {
+      await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/respond`, {
+        answer,
+        kind: "revision"
+      });
+      const run = await postJson<{ session: ApiSession }>(`/api/sessions/${session.id}/run`);
+      const nextSession = hasDoctorOutput(run.session.output)
+        ? run.session
+        : {
+            ...run.session,
+            output: session.output
+          };
+
+      setSession(nextSession);
+      setFollowup("");
+      setMessage(
+        hasDoctorOutput(run.session.output)
+          ? completionMessage(run.session.output)
+          : "这次没有返回新的诊断内容，先保留上一版结果。"
+      );
+      window.requestAnimationFrame(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "继续分析失败，请再试一次。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function writeBack() {
     if (!session?.id) {
       return;
@@ -748,30 +788,54 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             {loading ? "正在复盘" : "开始复盘"}
           </button>
           {message ? <p className="muted">{message}</p> : null}
-        </section>
-
-        <aside className="surface-card glass" ref={resultRef}>
-          <span className="label">本次结论</span>
-          <h3>这次先改这几件事</h3>
-          <div className="callout warning">
-            <strong>主要问题</strong>
-            <p>{output.mainIssue}</p>
-          </div>
-          {output.evidence ? (
-            <div className="callout">
-              <strong>判断依据</strong>
-              <p>{output.evidence}</p>
+          {session ? (
+            <div className="doctor-followup-card">
+              <div>
+                <strong>继续问 Doctor</strong>
+                <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
+              </div>
+              <textarea
+                onChange={(event) => setFollowup(event.target.value)}
+                placeholder="例如：为什么你觉得 15 秒这里会掉？结尾应该怎么改得不生硬？"
+                rows={3}
+                value={followup}
+              />
+              <button
+                className="button-secondary"
+                disabled={!followup.trim() || loading}
+                onClick={handleFollowup}
+                type="button"
+              >
+                继续分析
+              </button>
             </div>
           ) : null}
-          <div className="action-bullets">
-            {(output.actions ?? []).map((item) => (
-              <div className="bullet-row" key={item}>
-                <span className="bullet-dot" />
-                <span>{item}</span>
+        </section>
+
+        <aside className="surface-card glass doctor-result-card" ref={resultRef}>
+          <div className="doctor-result-scroll">
+            <span className="label">本次结论</span>
+            <h3>这次先改这几件事</h3>
+            <div className="callout warning">
+              <strong>主要问题</strong>
+              <p>{output.mainIssue}</p>
+            </div>
+            {output.evidence ? (
+              <div className="callout">
+                <strong>判断依据</strong>
+                <p>{output.evidence}</p>
               </div>
-            ))}
+            ) : null}
+            <div className="action-bullets">
+              {(output.actions ?? []).map((item) => (
+                <div className="bullet-row" key={item}>
+                  <span className="bullet-dot" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="page-actions">
+          <div className="page-actions doctor-result-actions">
             <Link className="button-primary" href="/director">
               按结论重写脚本
             </Link>
