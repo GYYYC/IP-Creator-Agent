@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { creatorMemory, profileAssetInsights } from "@/lib/demo-data";
+import { profileAssetInsights } from "@/lib/demo-data";
 
 type AssetMode = "graphic" | "video";
 type ProfileForm = {
@@ -61,6 +61,13 @@ function fileNames(files: File[]) {
 
   return files.map((file) => file.name);
 }
+
+const EMPTY_PROFILE_FORM: ProfileForm = {
+  role: "",
+  story: "",
+  audience: "",
+  tone: ""
+};
 
 const DEFAULT_PROFILE_FORM: ProfileForm = {
   role: "我是二战上岸的人，不是天赋型选手，但我很擅长把复杂备考拆成普通人能执行的步骤。",
@@ -124,7 +131,8 @@ function profileFormFromPayload(payload: ProfilePayload): ProfileForm {
 }
 
 export function ProfileStudio() {
-  const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE_FORM);
+  const [profileForm, setProfileForm] = useState<ProfileForm>(EMPTY_PROFILE_FORM);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [assetMode, setAssetMode] = useState<AssetMode>("video");
   const [contentFiles, setContentFiles] = useState<File[]>([]);
   const [supportFiles, setSupportFiles] = useState<File[]>([]);
@@ -137,6 +145,15 @@ export function ProfileStudio() {
   const config = ASSET_MODE_CONFIG[assetMode];
   const insights = profileAssetInsights[assetMode];
   const canAnalyze = contentFiles.length > 0;
+  const profileNotes = useMemo(
+    () => [
+      { title: "长期定位", body: profileForm.role || "先写下你希望被记住的身份。" },
+      { title: "代表经历", body: profileForm.story || "补一段最能证明你可信的经历。" },
+      { title: "目标受众", body: profileForm.audience || "明确你最想帮助哪类人。" },
+      { title: "表达感受", body: profileForm.tone || "写清楚别人应该从你这里感受到什么。" }
+    ],
+    [profileForm]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -147,9 +164,12 @@ export function ProfileStudio() {
 
         if (!cancelled) {
           setProfileForm(profileFormFromPayload(payload));
+          setProfileLoaded(true);
         }
       } catch (error) {
         if (!cancelled) {
+          setProfileForm(DEFAULT_PROFILE_FORM);
+          setProfileLoaded(true);
           setProfileMessage(error instanceof Error ? error.message : "画像暂时没有读取成功。");
         }
       }
@@ -279,9 +299,11 @@ export function ProfileStudio() {
         <section className="surface-card glass">
           <span className="label">基础信息</span>
           <h3>把你的长期定位写清楚</h3>
+          {!profileLoaded ? <p className="muted">正在读取画像</p> : null}
           <div className="input-group">
             <label htmlFor="profile-role">最想让别人先记住你什么</label>
             <textarea
+              disabled={!profileLoaded}
               id="profile-role"
               onChange={(event) => updateProfileField("role", event.target.value)}
               rows={5}
@@ -291,6 +313,7 @@ export function ProfileStudio() {
           <div className="input-group">
             <label htmlFor="profile-story">最值得讲的经历</label>
             <textarea
+              disabled={!profileLoaded}
               id="profile-story"
               onChange={(event) => updateProfileField("story", event.target.value)}
               rows={5}
@@ -300,6 +323,7 @@ export function ProfileStudio() {
           <div className="input-group">
             <label htmlFor="profile-audience">你最想帮助哪类人</label>
             <textarea
+              disabled={!profileLoaded}
               id="profile-audience"
               onChange={(event) => updateProfileField("audience", event.target.value)}
               rows={5}
@@ -309,6 +333,7 @@ export function ProfileStudio() {
           <div className="input-group">
             <label htmlFor="profile-tone">别人应该从你这里感受到什么</label>
             <textarea
+              disabled={!profileLoaded}
               id="profile-tone"
               onChange={(event) => updateProfileField("tone", event.target.value)}
               rows={5}
@@ -318,7 +343,7 @@ export function ProfileStudio() {
           <div className="page-actions">
             <button
               className="button-primary"
-              disabled={savingProfile}
+              disabled={savingProfile || !profileLoaded}
               onClick={saveProfileBasics}
               type="button"
             >
@@ -437,7 +462,7 @@ export function ProfileStudio() {
           </div>
         ) : (
           <div className="action-list">
-            {creatorMemory.notes.map((note) => (
+            {profileNotes.map((note) => (
               <div className="action-row" key={note.title}>
                 <div>
                   <strong>{note.title}</strong>

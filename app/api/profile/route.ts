@@ -29,6 +29,7 @@ export async function PATCH(request: Request) {
     platform: mergeObject(profile.platform, body.platform),
     updatedAt: now
   };
+  nextProfile.brainSnapshot = buildManualBrainSnapshot(nextProfile);
 
   await upsertProfile(nextProfile);
 
@@ -48,6 +49,30 @@ export async function PATCH(request: Request) {
   }
 
   return jsonOk({ profile: nextProfile });
+}
+
+function buildManualBrainSnapshot(profile: Awaited<ReturnType<typeof getOrCreateProfile>>) {
+  const role = asString(profile.identity.role);
+  const proof = asString(profile.identity.proof);
+  const target = asString(profile.audience.target);
+  const tone = asString(profile.style.tone);
+  const nextNotes = [
+    role ? { title: "长期定位", body: role, category: "identity" as const } : null,
+    proof ? { title: "代表经历", body: proof, category: "identity" as const } : null,
+    target ? { title: "目标受众", body: target, category: "audience" as const } : null,
+    tone ? { title: "表达感受", body: tone, category: "style" as const } : null
+  ].filter((note): note is NonNullable<typeof note> => Boolean(note));
+
+  return {
+    ...profile.brainSnapshot,
+    title: role || profile.brainSnapshot.title,
+    subtitle: target || profile.brainSnapshot.subtitle,
+    notes: nextNotes.slice(0, 8)
+  };
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function mergeObject(
