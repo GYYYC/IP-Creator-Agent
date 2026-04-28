@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
@@ -46,6 +47,8 @@ type ArtifactRegistrationInput = {
   mimeType: string;
   fileName: string;
   sizeBytes?: number;
+  storageKey?: string;
+  url?: string;
   extractedText?: string;
   extractedJson?: Record<string, unknown>;
 };
@@ -74,7 +77,15 @@ type VideoTranscript = {
   durationSeconds: number;
   estimatedWordCount: number;
   status: string;
+  url?: string;
   message?: string;
+};
+
+type BlobUploadResult = {
+  url: string;
+  downloadUrl: string;
+  pathname: string;
+  contentType: string;
 };
 
 type ScriptLengthGuide = {
@@ -236,6 +247,12 @@ function isVideoFile(file: File) {
   return file.type.startsWith("video/");
 }
 
+function safeUploadPath(fileName: string) {
+  const safeName = fileName.replace(/[^\w.\-]+/g, "_");
+
+  return `doctor/videos/${Date.now()}-${safeName || "video.mp4"}`;
+}
+
 function countTextUnits(text: string) {
   const cjkCount = text.match(/[\u3400-\u9fff]/g)?.length ?? 0;
   const latinCount = text
@@ -338,6 +355,7 @@ function getSessionTranscripts(session: ApiSession | null): VideoTranscript[] {
             ? record.estimatedWordCount
             : countTextUnits(text),
         status: typeof record.status === "string" ? record.status : "ok",
+        url: typeof record.url === "string" ? record.url : undefined,
         message: typeof record.message === "string" ? record.message : undefined
       };
     })
@@ -556,10 +574,52 @@ async function readVideoMetadata(file: File): Promise<VideoMetadata> {
   }
 }
 
+async function uploadVideoToBlob(file: File): Promise<BlobUploadResult | null> {
+  try {
+    return await upload(safeUploadPath(file.name), file, {
+      access: "public",
+      contentType: file.type || "application/octet-stream",
+      handleUploadUrl: "/api/uploads/blob",
+      multipart: true,
+      clientPayload: JSON.stringify({
+        kind: "doctor-video",
+        fileName: file.name
+      })
+    });
+  } catch (error) {
+    console.warn(
+      `[Doctor] Blob upload failed: ${error instanceof Error ? error.message : "unknown error"}`
+    );
+    return null;
+  }
+}
+
 async function transcribeVideoFile(
   file: File,
-  durationSeconds: number
+  durationSeconds: number,
+  blob: BlobUploadResult | null
 ): Promise<VideoTranscript> {
+  if (blob?.url) {
+    try {
+      return await postJson<VideoTranscript>("/api/doctor/transcribe", {
+        url: blob.url,
+        fileName: file.name,
+        contentType: file.type,
+        durationSeconds
+      });
+    } catch (error) {
+      return {
+        fileName: file.name,
+        text: "",
+        durationSeconds,
+        estimatedWordCount: 0,
+        status: "request_error",
+        url: blob.url,
+        message: error instanceof Error ? error.message : "这次没有拿到口播转写。"
+      };
+    }
+  }
+
   if (file.size > TRANSCRIPTION_FILE_LIMIT_BYTES) {
     return {
       fileName: file.name,
@@ -803,7 +863,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             dataUrl: visualDataUrl
           });
         }
-      }
+        }
 
       for (const file of videoFiles) {
         setMessage(`正在读取 ${file.name} 的时长`);
@@ -815,8 +875,28 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
         }));
         videoMetadata.push(metadata);
 
+        setMessage(`正在上传 ${file.name}`);
+        const blob = await uploadVideoToBlob(file);
+
+        if (blob?.url) {
+          artifactPayloads.push({
+            kind: "video",
+            mimeType: file.type,
+            fileName: file.name,
+            sizeBytes: file.size,
+            url: blob.url,
+            storageKey: blob.pathname,
+            extractedJson: {
+              durationSeconds: metadata.durationSeconds,
+              width: metadata.width,
+              height: metadata.height,
+              uploadMode: "vercel_blob"
+            }
+          });
+        }
+
         setMessage(`正在识别 ${file.name} 的口播`);
-        const transcript = await transcribeVideoFile(file, metadata.durationSeconds);
+        const transcript = await transcribeVideoFile(file, metadata.durationSeconds, blob);
         audioTranscripts.push(transcript);
 
         if (transcript.text.trim()) {

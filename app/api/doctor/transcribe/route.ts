@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/agent/http";
-import { transcribeAudioFile } from "@/lib/agent/llm";
+import { transcribeAudioFile, transcribeAudioUrl } from "@/lib/agent/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -9,6 +9,41 @@ const MAX_TRANSCRIPTION_BYTES = Number(
 );
 
 export async function POST(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const body = (await request.json()) as Record<string, unknown>;
+    const url = typeof body.url === "string" ? body.url : "";
+    const fileName = typeof body.fileName === "string" ? body.fileName : "video.mp4";
+    const durationSeconds = Number(body.durationSeconds || 0);
+
+    if (!url) {
+      return jsonError("URL is required.");
+    }
+
+    const result = await transcribeAudioUrl({
+      url,
+      fileName,
+      contentType: typeof body.contentType === "string" ? body.contentType : undefined,
+      language: "zh"
+    });
+    const text = result.text.trim();
+
+    return jsonOk({
+      text,
+      fileName,
+      url,
+      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+      estimatedWordCount: estimateWordCount(text),
+      model: result.model,
+      status: result.status,
+      message:
+        result.status === "ok"
+          ? "已识别口播内容。"
+          : "这次没有拿到口播转写，继续按关键画面和你的说明分析。"
+    });
+  }
+
   const formData = await request.formData();
   const file = formData.get("file");
 

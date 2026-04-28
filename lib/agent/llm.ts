@@ -202,6 +202,53 @@ export async function transcribeAudioFile(params: {
   }
 }
 
+export async function transcribeAudioUrl(params: {
+  url: string;
+  fileName: string;
+  contentType?: string;
+  language?: string;
+}) {
+  try {
+    const response = await fetchWithTimeout(
+      params.url,
+      {
+        method: "GET"
+      },
+      TRANSCRIPTION_TIMEOUT_MS
+    );
+
+    if (!response.ok) {
+      console.warn(
+        `[AI] transcription source fetch failed: status=${response.status} url=${params.url}`
+      );
+      return {
+        text: "",
+        model: getTranscriptionModel(),
+        status: `source_failed_${response.status}`
+      };
+    }
+
+    const blob = await response.blob();
+    const file = new File([blob], params.fileName, {
+      type: params.contentType || blob.type || "application/octet-stream"
+    });
+
+    return transcribeAudioFile({
+      file,
+      language: params.language
+    });
+  } catch (error) {
+    console.warn(
+      `[AI] transcription source fetch error: ${error instanceof Error ? error.message : "unknown error"}`
+    );
+    return {
+      text: "",
+      model: getTranscriptionModel(),
+      status: "source_request_error"
+    };
+  }
+}
+
 export async function callJsonModel(params: {
   system: string;
   user: JsonRecord;
