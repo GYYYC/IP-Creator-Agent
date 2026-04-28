@@ -1171,8 +1171,18 @@ svg {
   align-items: start;
 }
 
+.doctor-workbench-grid {
+  align-items: stretch;
+}
+
+.doctor-input-card,
 .doctor-result-card {
-  max-height: 640px;
+  min-height: 100%;
+}
+
+.doctor-result-card {
+  display: flex;
+  flex-direction: column;
   padding: 0;
   overflow: hidden;
 }
@@ -1180,7 +1190,8 @@ svg {
 .doctor-result-scroll {
   display: grid;
   gap: 14px;
-  max-height: 500px;
+  flex: 1;
+  min-height: 280px;
   padding: 22px 22px 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1205,9 +1216,10 @@ svg {
 .doctor-followup-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
+  margin: 0 22px 14px;
+  padding: 14px;
+  border: 1px solid rgba(75, 97, 123, 0.72);
+  border-radius: 16px;
   background:
     radial-gradient(circle at 18% 18%, rgba(0, 108, 255, 0.12), transparent 42%),
     rgba(192, 203, 216, 0.035);
@@ -1226,7 +1238,7 @@ svg {
 
 .doctor-followup-card textarea {
   width: 100%;
-  min-height: 86px;
+  min-height: 76px;
   padding: 13px 14px;
   resize: vertical;
   border: 1px solid var(--border);

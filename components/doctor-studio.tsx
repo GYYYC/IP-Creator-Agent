@@ -692,8 +692,8 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
 
   return (
     <>
-      <div className="task-dashboard-grid">
-        <section className="surface-card glass">
+      <div className="task-dashboard-grid doctor-workbench-grid">
+        <section className="surface-card glass doctor-input-card">
           <span className="label">输入</span>
           <h3>{config.title}</h3>
           <div className="mode-switch">
@@ -788,28 +788,6 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             {loading ? "正在复盘" : "开始复盘"}
           </button>
           {message ? <p className="muted">{message}</p> : null}
-          {session ? (
-            <div className="doctor-followup-card">
-              <div>
-                <strong>继续问 Doctor</strong>
-                <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
-              </div>
-              <textarea
-                onChange={(event) => setFollowup(event.target.value)}
-                placeholder="例如：为什么你觉得 15 秒这里会掉？结尾应该怎么改得不生硬？"
-                rows={3}
-                value={followup}
-              />
-              <button
-                className="button-secondary"
-                disabled={!followup.trim() || loading}
-                onClick={handleFollowup}
-                type="button"
-              >
-                继续分析
-              </button>
-            </div>
-          ) : null}
         </section>
 
         <aside className="surface-card glass doctor-result-card" ref={resultRef}>
@@ -835,6 +813,28 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               ))}
             </div>
           </div>
+          {session ? (
+            <div className="doctor-followup-card">
+              <div>
+                <strong>继续问 Doctor</strong>
+                <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
+              </div>
+              <textarea
+                onChange={(event) => setFollowup(event.target.value)}
+                placeholder="例如：为什么你觉得 15 秒这里会掉？结尾应该怎么改得不生硬？"
+                rows={3}
+                value={followup}
+              />
+              <button
+                className="button-secondary"
+                disabled={!followup.trim() || loading}
+                onClick={handleFollowup}
+                type="button"
+              >
+                继续分析
+              </button>
+            </div>
+          ) : null}
           <div className="page-actions doctor-result-actions">
             <Link className="button-primary" href="/director">
               按结论重写脚本
