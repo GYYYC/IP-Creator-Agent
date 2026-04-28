@@ -88,6 +88,12 @@ type BlobUploadResult = {
   contentType: string;
 };
 
+type BlobUploadOutcome = {
+  blob: BlobUploadResult | null;
+  status: "ok" | "timeout" | "failed";
+  message?: string;
+};
+
 type ScriptLengthGuide = {
   basis: "transcript" | "duration" | "unknown";
   targetDurationSeconds: number;
@@ -143,7 +149,7 @@ async function postFormData<T>(url: string, body: FormData) {
 
 const DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BLOB_MULTIPART_THRESHOLD_BYTES = 25 * 1024 * 1024;
-const BLOB_UPLOAD_TIMEOUT_MS = 180000;
+const BLOB_UPLOAD_TIMEOUT_MS = 60000;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -579,32 +585,53 @@ async function readVideoMetadata(file: File): Promise<VideoMetadata> {
 async function uploadVideoToBlob(
   file: File,
   onProgress?: (percentage: number) => void
-): Promise<BlobUploadResult | null> {
+): Promise<BlobUploadOutcome> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), BLOB_UPLOAD_TIMEOUT_MS);
+  let timeoutId: number | undefined;
+
+  const uploadTask = upload(safeUploadPath(file.name), file, {
+    access: "public",
+    contentType: file.type || "application/octet-stream",
+    handleUploadUrl: "/api/uploads/blob",
+    multipart: file.size > BLOB_MULTIPART_THRESHOLD_BYTES,
+    abortSignal: controller.signal,
+    onUploadProgress: (progress) => {
+      onProgress?.(Math.max(0, Math.min(100, Math.round(progress.percentage))));
+    },
+    clientPayload: JSON.stringify({
+      kind: "doctor-video",
+      fileName: file.name
+    })
+  })
+    .then((blob): BlobUploadOutcome => ({ blob, status: "ok" }))
+    .catch((error): BlobUploadOutcome => {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      console.warn(`[Doctor] Blob upload failed: ${reason}`);
+
+      return {
+        blob: null,
+        status: "failed",
+        message: `视频没有传到 Blob：${reason}`
+      };
+    });
+
+  const timeoutTask = new Promise<BlobUploadOutcome>((resolve) => {
+    timeoutId = window.setTimeout(() => {
+      controller.abort();
+      resolve({
+        blob: null,
+        status: "timeout",
+        message: "视频上传超过 60 秒，已先按关键画面分析。"
+      });
+    }, BLOB_UPLOAD_TIMEOUT_MS);
+  });
 
   try {
-    return await upload(safeUploadPath(file.name), file, {
-      access: "public",
-      contentType: file.type || "application/octet-stream",
-      handleUploadUrl: "/api/uploads/blob",
-      multipart: file.size > BLOB_MULTIPART_THRESHOLD_BYTES,
-      abortSignal: controller.signal,
-      onUploadProgress: (progress) => {
-        onProgress?.(Math.max(0, Math.min(100, Math.round(progress.percentage))));
-      },
-      clientPayload: JSON.stringify({
-        kind: "doctor-video",
-        fileName: file.name
-      })
-    });
-  } catch (error) {
-    console.warn(
-      `[Doctor] Blob upload failed: ${error instanceof Error ? error.message : "unknown error"}`
-    );
-    return null;
+    return await Promise.race([uploadTask, timeoutTask]);
   } finally {
-    window.clearTimeout(timeout);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -890,9 +917,10 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
         videoMetadata.push(metadata);
 
         setMessage(`正在上传 ${file.name}`);
-        const blob = await uploadVideoToBlob(file, (percentage) => {
+        const uploadResult = await uploadVideoToBlob(file, (percentage) => {
           setMessage(`正在上传 ${file.name} ${percentage}%`);
         });
+        const blob = uploadResult.blob;
 
         if (blob?.url) {
           artifactPayloads.push({
@@ -910,7 +938,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             }
           });
         } else if (file.size > DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES) {
-          setMessage(`${file.name} 没有传到 Blob，这次先按关键画面分析。`);
+          setMessage(uploadResult.message || `${file.name} 没有传到 Blob，这次先按关键画面分析。`);
         }
 
         setMessage(`正在识别 ${file.name} 的口播`);

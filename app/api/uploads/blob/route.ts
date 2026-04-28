@@ -21,14 +21,20 @@ export async function POST(request: Request) {
         const payload = parseClientPayload(clientPayload);
 
         return {
-          allowedContentTypes: payload?.kind === "doctor-video" ? ["video/*"] : ["image/*", "video/*"],
+          allowedContentTypes:
+            payload?.kind === "doctor-video"
+              ? [
+                  "video/mp4",
+                  "video/webm",
+                  "video/quicktime",
+                  "video/x-m4v",
+                  "application/octet-stream"
+                ]
+              : ["image/*", "video/*", "application/octet-stream"],
           maximumSizeInBytes: MAX_BLOB_UPLOAD_BYTES,
           addRandomSuffix: true,
           tokenPayload: clientPayload
         };
-      },
-      onUploadCompleted: async () => {
-        // The session stores the blob URL after the client receives it.
       }
     });
 
