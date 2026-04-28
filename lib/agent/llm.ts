@@ -64,9 +64,7 @@ function getTranscriptionApiKey() {
 function hasExplicitTranscriptionConfig() {
   return Boolean(
     process.env.OPENAI_TRANSCRIPTION_BASE_URL ||
-      process.env.OPENAI_TRANSCRIPTION_API_KEY ||
-      process.env.OPENAI_TRANSCRIPTION_MODEL ||
-      process.env.AI_TRANSCRIPTION_MODEL
+      process.env.OPENAI_TRANSCRIPTION_API_KEY
   );
 }
 
@@ -107,7 +105,11 @@ function canUseTranscriptionEndpoint() {
     "https://api.openai.com"
   ).replace(/\/+$/, "");
 
-  return hasExplicitTranscriptionConfig() || baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1";
+  return hasExplicitTranscriptionConfig() || isOfficialOpenAiBaseUrl(baseUrl);
+}
+
+function isOfficialOpenAiBaseUrl(baseUrl: string) {
+  return baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1";
 }
 
 function extractJson(text: string) {
@@ -240,6 +242,14 @@ export async function transcribeAudioFile(params: {
       console.warn(
         `[AI] transcription failed: status=${response.status} model=${model} body=${errorText.slice(0, 500)}`
       );
+      if (response.status === 404 && !process.env.OPENAI_TRANSCRIPTION_BASE_URL) {
+        return {
+          text: "",
+          model,
+          status: "transcription_not_configured"
+        };
+      }
+
       return {
         text: "",
         model,
