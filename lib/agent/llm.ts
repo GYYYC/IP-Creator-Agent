@@ -20,13 +20,23 @@ const DEFAULT_BASE_URL =
   process.env.AI_BASE_URL ||
   process.env.ANTHROPIC_BASE_URL ||
   "https://api.openai.com";
-const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 25000);
+const REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 120000);
+const VISION_REQUEST_TIMEOUT_MS = Number(
+  process.env.AI_VISION_REQUEST_TIMEOUT_MS ||
+    process.env.AI_DOCTOR_REQUEST_TIMEOUT_MS ||
+    process.env.AI_REQUEST_TIMEOUT_MS ||
+    180000
+);
 const TRANSCRIPTION_TIMEOUT_MS = Number(
   process.env.AI_TRANSCRIPTION_TIMEOUT_MS ||
   process.env.AI_REQUEST_TIMEOUT_MS ||
   90000
 );
 const TRANSCRIPTION_SOURCE_RETRY_STATUSES = new Set([403, 404, 408, 425, 429, 500, 502, 503, 504]);
+const MODEL_IMAGE_DETAIL =
+  process.env.AI_IMAGE_DETAIL === "low" || process.env.AI_IMAGE_DETAIL === "high"
+    ? process.env.AI_IMAGE_DETAIL
+    : "auto";
 
 function getProvider(): AiProvider {
   if (process.env.AI_PROVIDER === "anthropic") {
@@ -77,6 +87,10 @@ function getTranscriptionProvider(): TranscriptionProvider {
 
   if (provider === "none" || provider === "disabled") {
     return "none";
+  }
+
+  if (isDoubaoTranscriptionConfigured()) {
+    return "doubao";
   }
 
   return "openai";
@@ -176,6 +190,35 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQU
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchModelWithRetry(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  canRetry: boolean
+) {
+  const attempts = canRetry ? 2 : 1;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fetchWithTimeout(url, init, timeoutMs);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === attempts - 1) {
+        break;
+      }
+
+      console.warn(
+        `[AI] model request retrying after ${error instanceof Error ? error.message : "unknown error"}`
+      );
+      await wait(1200);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Model request failed.");
 }
 
 function wait(ms: number) {
@@ -552,7 +595,7 @@ export async function callJsonModel(params: {
             type: "image_url",
             image_url: {
               url: image.dataUrl,
-              detail: "high"
+              detail: MODEL_IMAGE_DETAIL
             }
           }))
         ]
@@ -583,8 +626,7 @@ export async function callJsonModel(params: {
           })
         ]
       : JSON.stringify(params.user);
-    const response = await fetchWithTimeout(
-      url,
+    const requestInit: RequestInit =
       provider === "anthropic"
         ? {
             method: "POST",
@@ -627,7 +669,12 @@ export async function callJsonModel(params: {
                 }
               ]
             })
-          }
+          };
+    const response = await fetchModelWithRetry(
+      url,
+      requestInit,
+      images.length ? VISION_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      images.length > 0
     );
 
     if (!response.ok) {

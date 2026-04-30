@@ -128,7 +128,7 @@ async function postJson<T>(url: string, body?: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined
   });
-  const payload = (await response.json()) as ApiResponse<T>;
+  const payload = await readApiResponse<T>(response);
 
   if (!payload.ok) {
     throw new Error(payload.error);
@@ -139,7 +139,7 @@ async function postJson<T>(url: string, body?: Record<string, unknown>) {
 
 async function fetchJson<T>(url: string) {
   const response = await fetch(url);
-  const payload = (await response.json()) as ApiResponse<T>;
+  const payload = await readApiResponse<T>(response);
 
   if (!payload.ok) {
     throw new Error(payload.error);
@@ -153,13 +153,34 @@ async function postFormData<T>(url: string, body: FormData) {
     method: "POST",
     body
   });
-  const payload = (await response.json()) as ApiResponse<T>;
+  const payload = await readApiResponse<T>(response);
 
   if (!payload.ok) {
     throw new Error(payload.error);
   }
 
   return payload.data;
+}
+
+async function readApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
+  const text = await response.text();
+
+  try {
+    const payload = JSON.parse(text) as ApiResponse<T>;
+
+    if (!response.ok && payload.ok) {
+      return { ok: false, error: `请求失败：HTTP ${response.status}` };
+    }
+
+    return payload;
+  } catch {
+    return {
+      ok: false,
+      error: text.trim()
+        ? `请求失败：HTTP ${response.status} ${text.slice(0, 160)}`
+        : `请求失败：HTTP ${response.status}`
+    };
+  }
 }
 
 async function retrieveBlobClientToken(params: {
@@ -205,6 +226,11 @@ const BLOB_UPLOAD_TIMEOUT_PER_MB_MS = 3000;
 const TRANSCRIPTION_AUDIO_SAMPLE_RATE = 16000;
 const TRANSCRIPTION_AUDIO_CHANNELS = 1;
 const TRANSCRIPTION_AUDIO_BITS = 16;
+const VISUAL_IMAGE_MAX_SIDE = 1280;
+const VIDEO_FRAME_MAX_SIDE = 960;
+const VISUAL_JPEG_QUALITY = 0.72;
+const VIDEO_FRAME_JPEG_QUALITY = 0.7;
+const MAX_VIDEO_FRAME_ARTIFACTS = 6;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -319,8 +345,12 @@ function safeUploadPath(fileName: string) {
 function safeAudioUploadPath(fileName: string) {
   const baseName = fileName.replace(/\.[^.]+$/, "");
   const safeName = baseName.replace(/[^\w.\-]+/g, "_");
+  const suffix =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  return `doctor/audio/${Date.now()}-${safeName || "audio"}.wav`;
+  return `doctor/audio/${Date.now()}-${suffix}-${safeName || "audio"}.wav`;
 }
 
 function blobUploadTimeoutMs(fileSize: number) {
@@ -457,7 +487,7 @@ async function fileToVisualDataUrl(file: File) {
   }
 
   const bitmap = await createImageBitmap(file);
-  const maxSide = 1600;
+  const maxSide = VISUAL_IMAGE_MAX_SIDE;
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
   const height = Math.max(1, Math.round(bitmap.height * scale));
@@ -474,7 +504,7 @@ async function fileToVisualDataUrl(file: File) {
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return canvas.toDataURL("image/jpeg", VISUAL_JPEG_QUALITY);
 }
 
 function waitForMediaEvent(target: HTMLMediaElement, eventName: string) {
@@ -497,7 +527,7 @@ function waitForMediaEvent(target: HTMLMediaElement, eventName: string) {
   });
 }
 
-function normalizeFrameTimes(times: number[], duration: number, limit = 8) {
+function normalizeFrameTimes(times: number[], duration: number, limit = MAX_VIDEO_FRAME_ARTIFACTS) {
   const max = Math.max(0, duration);
 
   return Array.from(
@@ -779,7 +809,7 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
       kind: "doctor-audio"
     });
     const uploader = await createMultipartUploader(pathname, {
-      access: "private",
+      access: "public",
       token,
       contentType,
       abortSignal: controller.signal
@@ -798,7 +828,7 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
   }
 
   return upload(pathname, file, {
-    access: "private",
+    access: "public",
     contentType,
     handleUploadUrl: "/api/uploads/blob",
     multipart: false,
@@ -956,8 +986,7 @@ async function transcribeVideoFile(
   if (audio?.blob.url) {
     try {
       return await postJson<VideoTranscript>("/api/doctor/transcribe", {
-        url: audio.blob.url,
-        storageKey: audio.blob.pathname,
+        url: audio.blob.downloadUrl || audio.blob.url,
         fileName: audio.fileName,
         contentType: audio.contentType,
         audioFormat: audio.audioFormat,
@@ -1055,7 +1084,7 @@ async function extractVideoFrameArtifacts(
       stats: params.stats,
       retentionImages: params.retentionImages
     });
-    const maxSide = 1600;
+    const maxSide = VIDEO_FRAME_MAX_SIDE;
     const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
     const width = Math.max(1, Math.round(video.videoWidth * scale));
     const height = Math.max(1, Math.round(video.videoHeight * scale));
@@ -1078,7 +1107,7 @@ async function extractVideoFrameArtifacts(
         await waitForMediaEvent(video, "seeked");
       }
       context.drawImage(video, 0, 0, width, height);
-      const visualDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      const visualDataUrl = canvas.toDataURL("image/jpeg", VIDEO_FRAME_JPEG_QUALITY);
       frameArtifacts.push({
         kind: "image",
         mimeType: "image/jpeg",

@@ -8,6 +8,8 @@ import {
 import { getStore, upsertSession } from "@/lib/agent/store";
 import { AgentRunResult, AgentSession, ArtifactRecord, CreatorProfile } from "@/lib/agent/types";
 
+const DOCTOR_VISUAL_INPUT_LIMIT = Number(process.env.DOCTOR_VISUAL_INPUT_LIMIT || 6);
+
 export async function runAgentSession(
   session: AgentSession,
   profile: CreatorProfile
@@ -106,7 +108,7 @@ function buildVisualInputs(artifacts: ArtifactRecord[]) {
       };
     })
     .filter((item): item is { dataUrl: string; label: string } => Boolean(item))
-    .slice(0, 8);
+    .slice(0, DOCTOR_VISUAL_INPUT_LIMIT);
 }
 
 function resultSchemaForModule(module: AgentSession["module"]) {

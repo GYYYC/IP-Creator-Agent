@@ -4,7 +4,7 @@ import { runAgentSession } from "@/lib/agent/orchestrator";
 import { getStore } from "@/lib/agent/store";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(
   _request: Request,

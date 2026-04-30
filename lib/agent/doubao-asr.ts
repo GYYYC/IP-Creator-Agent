@@ -17,6 +17,16 @@ type DoubaoQueryResponse = {
   };
 };
 
+type DoubaoAudioPayload = {
+  url: string;
+  format: "raw" | "wav" | "mp3" | "ogg";
+  codec?: "raw" | "opus";
+  rate?: number;
+  bits?: number;
+  channel?: number;
+  language?: string;
+};
+
 const DOUBAO_DEFAULT_SUBMIT_ENDPOINT = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
 const DOUBAO_DEFAULT_QUERY_ENDPOINT = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query";
 const DOUBAO_DEFAULT_RESOURCE_ID = "volc.seedasr.auc";
@@ -76,7 +86,7 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     );
     await verifySourceUrl(params.sourceUrl);
 
-    await submitDoubaoTask({
+    const submitResult = await submitDoubaoTask({
       endpoint: submitEndpoint,
       authHeaders,
       resourceId,
@@ -94,6 +104,7 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
       authHeaders,
       resourceId,
       requestId,
+      logId: submitResult.logId,
       startedAt
     });
 
@@ -178,13 +189,14 @@ async function submitDoubaoTask(params: {
         uid: "ip-creator-agent"
       },
       audio: {
-        url: params.sourceUrl,
-        format: toDoubaoAucFormat(params.audioFormat),
-        codec: params.audioFormat === "ogg" ? "opus" : "raw",
-        rate: params.sampleRate,
-        bits: params.bits,
-        channel: params.channels,
-        language: params.language
+        ...buildDoubaoAudioPayload({
+          sourceUrl: params.sourceUrl,
+          audioFormat: params.audioFormat,
+          sampleRate: params.sampleRate,
+          bits: params.bits,
+          channels: params.channels,
+          language: params.language
+        })
       },
       request: {
         model_name: "bigmodel",
@@ -209,6 +221,8 @@ async function submitDoubaoTask(params: {
       `submit failed http=${response.status} status=${status || "missing"} message=${message || "unknown"} logId=${logId || "unknown"} body=${body.slice(0, 500)}`
     );
   }
+
+  return { logId };
 }
 
 async function queryDoubaoTask(params: {
@@ -216,6 +230,7 @@ async function queryDoubaoTask(params: {
   authHeaders: Record<string, string>;
   resourceId: string;
   requestId: string;
+  logId: string;
   startedAt: number;
 }) {
   while (Date.now() - params.startedAt < DOUBAO_TIMEOUT_MS) {
@@ -227,7 +242,8 @@ async function queryDoubaoTask(params: {
         "Content-Type": "application/json",
         ...params.authHeaders,
         "X-Api-Resource-Id": params.resourceId,
-        "X-Api-Request-Id": params.requestId
+        "X-Api-Request-Id": params.requestId,
+        ...(params.logId ? { "X-Tt-Logid": params.logId } : {})
       },
       body: "{}"
     });
@@ -265,6 +281,34 @@ function buildDoubaoAuthHeaders(params: { apiKey: string; appKey: string; access
     "X-Api-App-Key": params.appKey,
     "X-Api-Access-Key": params.accessKey
   };
+}
+
+function buildDoubaoAudioPayload(params: {
+  sourceUrl: string;
+  audioFormat: "pcm" | "wav" | "mp3" | "ogg";
+  sampleRate: number;
+  bits: number;
+  channels: number;
+  language: string;
+}): DoubaoAudioPayload {
+  const payload: DoubaoAudioPayload = {
+    url: params.sourceUrl,
+    format: toDoubaoAucFormat(params.audioFormat),
+    language: params.language
+  };
+
+  if (params.audioFormat === "pcm") {
+    payload.codec = "raw";
+    payload.rate = params.sampleRate;
+    payload.bits = params.bits;
+    payload.channel = params.channels;
+  }
+
+  if (params.audioFormat === "ogg") {
+    payload.codec = "opus";
+  }
+
+  return payload;
 }
 
 function extractDoubaoText(payload: DoubaoQueryResponse) {

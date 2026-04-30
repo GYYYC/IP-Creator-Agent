@@ -2,7 +2,9 @@ import { jsonOk, readJson } from "@/lib/agent/http";
 import { callJsonModel } from "@/lib/agent/llm";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
+
+const MAX_FRAME_TIMES = Number(process.env.DOCTOR_FRAME_TIME_LIMIT || 6);
 
 type RetentionImageInput = {
   fileName: string;
@@ -100,5 +102,5 @@ function normalizeTimes(value: unknown, duration: number) {
     )
   )
     .sort((a, b) => a - b)
-    .slice(0, 8);
+    .slice(0, MAX_FRAME_TIMES);
 }

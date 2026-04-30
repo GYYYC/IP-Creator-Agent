@@ -3,7 +3,7 @@ import { createSignedBlobSourceUrl } from "@/lib/agent/blob-source-token";
 import { transcribeAudioBlobPath, transcribeAudioFile, transcribeAudioUrl } from "@/lib/agent/llm";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const MAX_TRANSCRIPTION_BYTES = Number(
   process.env.AI_TRANSCRIPTION_MAX_BYTES || 4 * 1024 * 1024
@@ -124,7 +124,9 @@ function parsePositiveNumber(value: unknown) {
 function getRequestOrigin(request: Request) {
   const forwardedHost = request.headers.get("x-forwarded-host");
   const host = forwardedHost || request.headers.get("host");
-  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+  const forwardedProto =
+    request.headers.get("x-forwarded-proto") ||
+    (host?.startsWith("localhost") || host?.startsWith("127.0.0.1") ? "http" : "https");
 
   return host ? `${forwardedProto}://${host}` : new URL(request.url).origin;
 }
