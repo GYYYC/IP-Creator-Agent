@@ -94,6 +94,16 @@ type BlobUploadOutcome = {
   message?: string;
 };
 
+type TranscriptionAudioUploadResult = {
+  blob: BlobUploadResult;
+  fileName: string;
+  contentType: string;
+  audioFormat: "pcm";
+  sampleRate: number;
+  channels: number;
+  bits: number;
+};
+
 type ScriptLengthGuide = {
   basis: "transcript" | "duration" | "unknown";
   targetDurationSeconds: number;
@@ -157,6 +167,7 @@ async function retrieveBlobClientToken(params: {
   multipart: boolean;
   file: File;
   uploadClient: string;
+  kind?: "doctor-video" | "doctor-audio";
 }) {
   const response = await fetch("/api/uploads/blob", {
     method: "POST",
@@ -168,7 +179,7 @@ async function retrieveBlobClientToken(params: {
         multipart: params.multipart,
         clientPayload: JSON.stringify({
           uploadClient: params.uploadClient,
-          kind: "doctor-video",
+          kind: params.kind || "doctor-video",
           fileName: params.file.name,
           sizeBytes: params.file.size,
           contentType: params.file.type || "application/octet-stream"
@@ -191,6 +202,9 @@ const MANUAL_MULTIPART_PART_BYTES = 5 * 1024 * 1024;
 const BLOB_UPLOAD_MIN_TIMEOUT_MS = 5 * 60 * 1000;
 const BLOB_UPLOAD_MAX_TIMEOUT_MS = 45 * 60 * 1000;
 const BLOB_UPLOAD_TIMEOUT_PER_MB_MS = 3000;
+const TRANSCRIPTION_AUDIO_SAMPLE_RATE = 16000;
+const TRANSCRIPTION_AUDIO_CHANNELS = 1;
+const TRANSCRIPTION_AUDIO_BITS = 16;
 
 const fallbackOutput: DoctorOutput = {
   mainIssue: "第 15 秒开始交代背景，信息密度突然下降，观众在这里流失最明显。",
@@ -300,6 +314,13 @@ function safeUploadPath(fileName: string) {
   const safeName = fileName.replace(/[^\w.\-]+/g, "_");
 
   return `doctor/videos/${Date.now()}-${safeName || "video.mp4"}`;
+}
+
+function safeAudioUploadPath(fileName: string) {
+  const baseName = fileName.replace(/\.[^.]+$/, "");
+  const safeName = baseName.replace(/[^\w.\-]+/g, "_");
+
+  return `doctor/audio/${Date.now()}-${safeName || "audio"}.pcm`;
 }
 
 function blobUploadTimeoutMs(fileSize: number) {
@@ -717,7 +738,8 @@ async function uploadVideoWithManualMultipart(
     pathname,
     multipart: true,
     file,
-    uploadClient: "doctor-video-v3-manual-multipart"
+    uploadClient: "doctor-video-v3-manual-multipart",
+    kind: "doctor-video"
   });
   const uploader = await createMultipartUploader(pathname, {
     access: "private",
@@ -743,11 +765,171 @@ async function uploadVideoWithManualMultipart(
   return blob;
 }
 
+async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadResult> {
+  const controller = new AbortController();
+  const pathname = safeAudioUploadPath(file.name);
+
+  if (file.size > MANUAL_MULTIPART_THRESHOLD_BYTES) {
+    const token = await retrieveBlobClientToken({
+      pathname,
+      multipart: true,
+      file,
+      uploadClient: "doctor-audio-v1-manual-multipart",
+      kind: "doctor-audio"
+    });
+    const uploader = await createMultipartUploader(pathname, {
+      access: "private",
+      token,
+      contentType: file.type || "audio/pcm",
+      abortSignal: controller.signal
+    });
+    const parts = [];
+    let partNumber = 1;
+
+    for (let offset = 0; offset < file.size; offset += MANUAL_MULTIPART_PART_BYTES) {
+      const end = Math.min(file.size, offset + MANUAL_MULTIPART_PART_BYTES);
+      const part = await uploader.uploadPart(partNumber, file.slice(offset, end, file.type || "audio/pcm"));
+      parts.push(part);
+      partNumber += 1;
+    }
+
+    return uploader.complete(parts);
+  }
+
+  return upload(pathname, file, {
+    access: "private",
+    contentType: file.type || "audio/pcm",
+    handleUploadUrl: "/api/uploads/blob",
+    multipart: false,
+    abortSignal: controller.signal,
+    clientPayload: JSON.stringify({
+      uploadClient: "doctor-audio-v1-single-put",
+      kind: "doctor-audio",
+      fileName: file.name,
+      sizeBytes: file.size,
+      contentType: file.type || "audio/pcm"
+    })
+  });
+}
+
+async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionAudioUploadResult | null> {
+  try {
+    const audioFile = await extractPcmAudioFile(file);
+
+    if (!audioFile) {
+      return null;
+    }
+
+    const blob = await uploadTranscriptionAudioToBlob(audioFile);
+
+    return {
+      blob,
+      fileName: audioFile.name,
+      contentType: audioFile.type || "audio/pcm",
+      audioFormat: "pcm",
+      sampleRate: TRANSCRIPTION_AUDIO_SAMPLE_RATE,
+      channels: TRANSCRIPTION_AUDIO_CHANNELS,
+      bits: TRANSCRIPTION_AUDIO_BITS
+    };
+  } catch (error) {
+    console.warn(
+      `[Doctor] transcription audio extraction failed: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`
+    );
+    return null;
+  }
+}
+
+async function extractPcmAudioFile(file: File): Promise<File | null> {
+  const AudioContextConstructor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextConstructor) {
+    return null;
+  }
+
+  const audioContext = new AudioContextConstructor();
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+
+    if (!audioBuffer.numberOfChannels || !audioBuffer.duration) {
+      return null;
+    }
+
+    const pcm = resampleToMonoPcm16(audioBuffer, TRANSCRIPTION_AUDIO_SAMPLE_RATE);
+    const safeBaseName = file.name.replace(/\.[^.]+$/, "") || "video";
+
+    return new File([pcm], `${safeBaseName}.pcm`, {
+      type: "audio/pcm"
+    });
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
+
+function resampleToMonoPcm16(audioBuffer: AudioBuffer, targetSampleRate: number) {
+  const sourceSampleRate = audioBuffer.sampleRate;
+  const targetLength = Math.max(1, Math.round(audioBuffer.duration * targetSampleRate));
+  const output = new ArrayBuffer(targetLength * 2);
+  const view = new DataView(output);
+  const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, index) =>
+    audioBuffer.getChannelData(index)
+  );
+
+  for (let index = 0; index < targetLength; index += 1) {
+    const sourcePosition = index * (sourceSampleRate / targetSampleRate);
+    const leftIndex = Math.floor(sourcePosition);
+    const rightIndex = Math.min(leftIndex + 1, audioBuffer.length - 1);
+    const ratio = sourcePosition - leftIndex;
+    const sample =
+      channels.reduce((sum, channel) => {
+        const left = channel[leftIndex] ?? 0;
+        const right = channel[rightIndex] ?? left;
+
+        return sum + left + (right - left) * ratio;
+      }, 0) / channels.length;
+    const clamped = Math.max(-1, Math.min(1, sample));
+    const pcmSample = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+
+    view.setInt16(index * 2, Math.round(pcmSample), true);
+  }
+
+  return output;
+}
+
 async function transcribeVideoFile(
   file: File,
   durationSeconds: number,
   blob: BlobUploadResult | null
 ): Promise<VideoTranscript> {
+  const audio = await prepareTranscriptionAudioBlob(file);
+
+  if (audio?.blob.url) {
+    try {
+      return await postJson<VideoTranscript>("/api/doctor/transcribe", {
+        url: audio.blob.url,
+        storageKey: audio.blob.pathname,
+        fileName: audio.fileName,
+        contentType: audio.contentType,
+        audioFormat: audio.audioFormat,
+        sampleRate: audio.sampleRate,
+        channels: audio.channels,
+        bits: audio.bits,
+        durationSeconds
+      });
+    } catch (error) {
+      console.warn(
+        `[Doctor] audio blob transcription failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`
+      );
+    }
+  }
+
   if (blob?.url) {
     try {
       return await postJson<VideoTranscript>("/api/doctor/transcribe", {

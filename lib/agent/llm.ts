@@ -1,8 +1,15 @@
 import { get } from "@vercel/blob";
+import {
+  getDoubaoAsrModelName,
+  isDoubaoTranscriptionConfigured,
+  transcribeWithDoubaoAsr
+} from "@/lib/agent/doubao-asr";
 
 type JsonRecord = Record<string, unknown>;
 
 type AiProvider = "openai" | "anthropic";
+type TranscriptionProvider = "openai" | "doubao" | "none";
+type TranscriptionAudioFormat = "pcm" | "wav" | "mp3" | "ogg";
 type ModelImageInput = {
   dataUrl: string;
   label?: string;
@@ -61,6 +68,20 @@ function getTranscriptionApiKey() {
   return process.env.OPENAI_TRANSCRIPTION_API_KEY || process.env.OPENAI_API_KEY || process.env.AI_API_KEY || "";
 }
 
+function getTranscriptionProvider(): TranscriptionProvider {
+  const provider = (process.env.TRANSCRIPTION_PROVIDER || "").toLowerCase();
+
+  if (provider === "doubao") {
+    return "doubao";
+  }
+
+  if (provider === "none" || provider === "disabled") {
+    return "none";
+  }
+
+  return "openai";
+}
+
 function hasExplicitTranscriptionConfig() {
   return Boolean(
     process.env.OPENAI_TRANSCRIPTION_BASE_URL ||
@@ -69,6 +90,10 @@ function hasExplicitTranscriptionConfig() {
 }
 
 function getTranscriptionModel() {
+  if (getTranscriptionProvider() === "doubao") {
+    return getDoubaoAsrModelName();
+  }
+
   return process.env.OPENAI_TRANSCRIPTION_MODEL || process.env.AI_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
 }
 
@@ -188,9 +213,56 @@ async function fetchTranscriptionSource(url: string) {
 export async function transcribeAudioFile(params: {
   file: File;
   language?: string;
+  audioFormat?: TranscriptionAudioFormat;
+  sampleRate?: number;
+  channels?: number;
+  bits?: number;
 }) {
+  const provider = getTranscriptionProvider();
   const apiKey = getTranscriptionApiKey();
   const model = getTranscriptionModel();
+
+  if (provider === "none") {
+    console.warn("[AI] transcription skipped: transcription provider disabled.");
+    return {
+      text: "",
+      model,
+      status: "transcription_not_configured"
+    };
+  }
+
+  if (provider === "doubao") {
+    if (!isDoubaoTranscriptionConfigured()) {
+      console.warn("[Doubao ASR] transcription skipped: missing DOUBAO_ASR_API_KEY.");
+      return {
+        text: "",
+        model,
+        status: "missing_api_key"
+      };
+    }
+
+    const audioFormat = params.audioFormat || inferDoubaoAudioFormat(params.file);
+    if (!audioFormat) {
+      console.warn(
+        `[Doubao ASR] transcription skipped: unsupported audio format file=${params.file.name} type=${params.file.type}`
+      );
+      return {
+        text: "",
+        model,
+        status: "unsupported_audio_format"
+      };
+    }
+
+    return transcribeWithDoubaoAsr({
+      audio: Buffer.from(await params.file.arrayBuffer()),
+      audioFormat,
+      sampleRate: params.sampleRate,
+      channels: params.channels,
+      bits: params.bits,
+      language: params.language,
+      fileName: params.file.name
+    });
+  }
 
   if (!apiKey) {
     console.warn("[AI] transcription skipped: missing transcription API key.");
@@ -281,6 +353,10 @@ export async function transcribeAudioUrl(params: {
   fileName: string;
   contentType?: string;
   language?: string;
+  audioFormat?: TranscriptionAudioFormat;
+  sampleRate?: number;
+  channels?: number;
+  bits?: number;
 }) {
   try {
     const response = await fetchTranscriptionSource(params.url);
@@ -303,7 +379,11 @@ export async function transcribeAudioUrl(params: {
 
     return transcribeAudioFile({
       file,
-      language: params.language
+      language: params.language,
+      audioFormat: params.audioFormat,
+      sampleRate: params.sampleRate,
+      channels: params.channels,
+      bits: params.bits
     });
   } catch (error) {
     console.warn(
@@ -322,6 +402,10 @@ export async function transcribeAudioBlobPath(params: {
   fileName: string;
   contentType?: string;
   language?: string;
+  audioFormat?: TranscriptionAudioFormat;
+  sampleRate?: number;
+  channels?: number;
+  bits?: number;
 }) {
   try {
     const result = await get(params.pathname, {
@@ -344,7 +428,11 @@ export async function transcribeAudioBlobPath(params: {
 
     return transcribeAudioFile({
       file,
-      language: params.language
+      language: params.language,
+      audioFormat: params.audioFormat,
+      sampleRate: params.sampleRate,
+      channels: params.channels,
+      bits: params.bits
     });
   } catch (error) {
     console.warn(
@@ -356,6 +444,29 @@ export async function transcribeAudioBlobPath(params: {
       status: "source_request_error"
     };
   }
+}
+
+function inferDoubaoAudioFormat(file: File): TranscriptionAudioFormat | null {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+
+  if (type.includes("pcm") || name.endsWith(".pcm")) {
+    return "pcm";
+  }
+
+  if (type.includes("wav") || name.endsWith(".wav")) {
+    return "wav";
+  }
+
+  if (type.includes("mpeg") || type.includes("mp3") || name.endsWith(".mp3")) {
+    return "mp3";
+  }
+
+  if (type.includes("ogg") || name.endsWith(".ogg")) {
+    return "ogg";
+  }
+
+  return null;
 }
 
 export async function callJsonModel(params: {

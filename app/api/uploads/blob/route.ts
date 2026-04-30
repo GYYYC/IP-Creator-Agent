@@ -101,7 +101,7 @@ export async function POST(request: Request) {
           `[Blob] token request: client=${payload?.uploadClient ?? "legacy"} kind=${payload?.kind ?? "unknown"} multipart=${multipart} size=${payload?.sizeBytes ?? "unknown"} contentType=${payload?.contentType ?? "unknown"} pathname=${pathname}`
         );
 
-        if (payload?.kind === "doctor-video") {
+        if (payload?.kind === "doctor-video" || payload?.kind === "doctor-audio") {
           return {
             ...options,
             addRandomSuffix: false
@@ -131,7 +131,7 @@ function parseClientPayload(value: string | null) {
   try {
     return JSON.parse(value) as {
       uploadClient?: string;
-      kind?: string;
+      kind?: "doctor-video" | "doctor-audio" | string;
       sizeBytes?: number;
       contentType?: string;
     };

@@ -17,6 +17,10 @@ export async function POST(request: Request) {
     const storageKey = typeof body.storageKey === "string" ? body.storageKey : "";
     const fileName = typeof body.fileName === "string" ? body.fileName : "video.mp4";
     const durationSeconds = Number(body.durationSeconds || 0);
+    const audioFormat = parseAudioFormat(body.audioFormat);
+    const sampleRate = parsePositiveNumber(body.sampleRate);
+    const channels = parsePositiveNumber(body.channels);
+    const bits = parsePositiveNumber(body.bits);
 
     if (!url && !storageKey) {
       return jsonError("URL or storageKey is required.");
@@ -27,13 +31,21 @@ export async function POST(request: Request) {
           pathname: storageKey,
           fileName,
           contentType: typeof body.contentType === "string" ? body.contentType : undefined,
-          language: "zh"
+          language: "zh",
+          audioFormat,
+          sampleRate,
+          channels,
+          bits
         })
       : await transcribeAudioUrl({
           url,
           fileName,
           contentType: typeof body.contentType === "string" ? body.contentType : undefined,
-          language: "zh"
+          language: "zh",
+          audioFormat,
+          sampleRate,
+          channels,
+          bits
         });
     const text = result.text.trim();
 
@@ -90,6 +102,16 @@ export async function POST(request: Request) {
         ? "已识别口播内容。"
         : "这次没有拿到口播转写，继续按关键画面和你的说明分析。"
   });
+}
+
+function parseAudioFormat(value: unknown) {
+  return value === "pcm" || value === "wav" || value === "mp3" || value === "ogg" ? value : undefined;
+}
+
+function parsePositiveNumber(value: unknown) {
+  const parsed = Number(value || 0);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function estimateWordCount(text: string) {
