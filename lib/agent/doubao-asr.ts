@@ -17,6 +17,17 @@ type DoubaoQueryResponse = {
   };
 };
 
+export type DoubaoTranscriptionResult = {
+  text: string;
+  model: string;
+  status: string;
+  provider: "doubao_auc";
+  taskId?: string;
+  logId?: string;
+  statusCode?: string;
+  message?: string;
+};
+
 type DoubaoAudioPayload = {
   url: string;
   format: "raw" | "wav" | "mp3" | "ogg";
@@ -39,6 +50,18 @@ const DOUBAO_TIMEOUT_MS = Number(
 );
 const DOUBAO_POLL_INTERVAL_MS = Number(process.env.DOUBAO_ASR_POLL_INTERVAL_MS || 2000);
 
+class DoubaoAucError extends Error {
+  constructor(
+    message: string,
+    public readonly stage: "submit" | "query",
+    public readonly httpStatus: number,
+    public readonly statusCode: string,
+    public readonly logId: string
+  ) {
+    super(message);
+  }
+}
+
 export function isDoubaoTranscriptionConfigured() {
   return Boolean(
     process.env.DOUBAO_ASR_API_KEY ||
@@ -57,14 +80,18 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
   const resourceId = getDoubaoAsrModelName();
   const submitEndpoint = process.env.DOUBAO_ASR_SUBMIT_ENDPOINT || DOUBAO_DEFAULT_SUBMIT_ENDPOINT;
   const queryEndpoint = process.env.DOUBAO_ASR_QUERY_ENDPOINT || DOUBAO_DEFAULT_QUERY_ENDPOINT;
+  let requestId = "";
+  let latestLogId = "";
+  let latestStatusCode = "";
 
   if (!apiKey && (!appKey || !accessKey)) {
     console.warn("[Doubao ASR] skipped: missing Doubao ASR credentials.");
     return {
       text: "",
       model: resourceId,
-      status: "missing_api_key"
-    };
+      status: "missing_api_key",
+      provider: "doubao_auc"
+    } satisfies DoubaoTranscriptionResult;
   }
 
   if (!params.sourceUrl) {
@@ -72,19 +99,19 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     return {
       text: "",
       model: resourceId,
-      status: "missing_source_url"
-    };
+      status: "missing_source_url",
+      provider: "doubao_auc"
+    } satisfies DoubaoTranscriptionResult;
   }
 
   try {
-    const requestId = randomUUID();
+    requestId = randomUUID();
     const authHeaders = buildDoubaoAuthHeaders({ apiKey, appKey, accessKey });
     const startedAt = Date.now();
 
     console.info(
       `[Doubao ASR] submitting AUC task: resource=${resourceId} requestId=${requestId} format=${params.audioFormat} file=${params.fileName ?? "unknown"} sourcePath=${safeLogUrlPath(params.sourceUrl)}`
     );
-    await verifySourceUrl(params.sourceUrl);
 
     const submitResult = await submitDoubaoTask({
       endpoint: submitEndpoint,
@@ -98,15 +125,19 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
       channels: params.channels || 1,
       language: normalizeDoubaoLanguage(params.language)
     });
+    latestLogId = submitResult.logId;
+    latestStatusCode = submitResult.statusCode;
 
-    const text = await queryDoubaoTask({
+    const queryResult = await queryDoubaoTask({
       endpoint: queryEndpoint,
       authHeaders,
       resourceId,
       requestId,
-      logId: submitResult.logId,
       startedAt
     });
+    latestLogId = queryResult.logId || latestLogId;
+    latestStatusCode = queryResult.statusCode || latestStatusCode;
+    const text = queryResult.text;
 
     console.info(
       `[Doubao ASR] completed AUC task: resource=${resourceId} requestId=${requestId} chars=${text.length}`
@@ -115,9 +146,22 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     return {
       text: text.trim(),
       model: resourceId,
-      status: text.trim() ? "ok" : "empty_response"
-    };
+      status: text.trim()
+        ? "ok"
+        : latestStatusCode === "20000003"
+          ? "silent_audio"
+          : "empty_response",
+      provider: "doubao_auc",
+      taskId: requestId,
+      logId: latestLogId || undefined,
+      statusCode: latestStatusCode || undefined
+    } satisfies DoubaoTranscriptionResult;
   } catch (error) {
+    if (error instanceof DoubaoAucError) {
+      latestLogId = error.logId || latestLogId;
+      latestStatusCode = error.statusCode || latestStatusCode;
+    }
+
     console.warn(
       `[Doubao ASR] request error: file=${params.fileName ?? "unknown"} ${
         error instanceof Error ? error.message : "unknown error"
@@ -127,39 +171,13 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     return {
       text: "",
       model: resourceId,
-      status: "request_error"
-    };
-  }
-}
-
-async function verifySourceUrl(sourceUrl: string) {
-  try {
-    const response = await fetchWithTimeout(sourceUrl, {
-      method: "HEAD",
-      cache: "no-store"
-    });
-
-    console.info(
-      `[Doubao ASR] source self-check: status=${response.status} type=${response.headers.get("content-type") || "unknown"} length=${response.headers.get("content-length") || "unknown"} path=${safeLogUrlPath(sourceUrl)}`
-    );
-
-    if (!response.ok) {
-      const fallback = await fetchWithTimeout(sourceUrl, {
-        method: "GET",
-        headers: {
-          Range: "bytes=0-31"
-        },
-        cache: "no-store"
-      });
-      fallback.body?.cancel().catch(() => undefined);
-      console.info(
-        `[Doubao ASR] source GET fallback: status=${fallback.status} type=${fallback.headers.get("content-type") || "unknown"} length=${fallback.headers.get("content-length") || "unknown"} path=${safeLogUrlPath(sourceUrl)}`
-      );
-    }
-  } catch (error) {
-    console.warn(
-      `[Doubao ASR] source self-check failed: ${error instanceof Error ? error.message : "unknown error"} path=${safeLogUrlPath(sourceUrl)}`
-    );
+      status: latestStatusCode ? statusForDoubaoCode(latestStatusCode) : "request_error",
+      provider: "doubao_auc",
+      taskId: requestId || undefined,
+      logId: latestLogId || undefined,
+      statusCode: latestStatusCode || undefined,
+      message: error instanceof Error ? error.message : "豆包 AUC 请求失败。"
+    } satisfies DoubaoTranscriptionResult;
   }
 }
 
@@ -173,7 +191,7 @@ async function submitDoubaoTask(params: {
   sampleRate: number;
   bits: number;
   channels: number;
-  language: string;
+  language?: string;
 }) {
   const response = await fetchWithTimeout(params.endpoint, {
     method: "POST",
@@ -201,13 +219,7 @@ async function submitDoubaoTask(params: {
       request: {
         model_name: "bigmodel",
         enable_itn: true,
-        enable_punc: true,
-        enable_ddc: false,
-        enable_speaker_info: false,
-        enable_channel_split: false,
-        show_utterances: false,
-        vad_segment: false,
-        sensitive_words_filter: ""
+        enable_punc: true
       }
     })
   });
@@ -217,12 +229,16 @@ async function submitDoubaoTask(params: {
 
   if (!response.ok || status !== "20000000") {
     const body = await response.text();
-    throw new Error(
-      `submit failed http=${response.status} status=${status || "missing"} message=${message || "unknown"} logId=${logId || "unknown"} body=${body.slice(0, 500)}`
+    throw new DoubaoAucError(
+      `submit failed http=${response.status} status=${status || "missing"} message=${message || "unknown"} logId=${logId || "unknown"} body=${body.slice(0, 500)}`,
+      "submit",
+      response.status,
+      status,
+      logId
     );
   }
 
-  return { logId };
+  return { logId, statusCode: status };
 }
 
 async function queryDoubaoTask(params: {
@@ -230,7 +246,6 @@ async function queryDoubaoTask(params: {
   authHeaders: Record<string, string>;
   resourceId: string;
   requestId: string;
-  logId: string;
   startedAt: number;
 }) {
   while (Date.now() - params.startedAt < DOUBAO_TIMEOUT_MS) {
@@ -242,8 +257,7 @@ async function queryDoubaoTask(params: {
         "Content-Type": "application/json",
         ...params.authHeaders,
         "X-Api-Resource-Id": params.resourceId,
-        "X-Api-Request-Id": params.requestId,
-        ...(params.logId ? { "X-Tt-Logid": params.logId } : {})
+        "X-Api-Request-Id": params.requestId
       },
       body: "{}"
     });
@@ -255,16 +269,32 @@ async function queryDoubaoTask(params: {
       continue;
     }
 
+    if (status === "20000003") {
+      return {
+        text: "",
+        logId,
+        statusCode: status
+      };
+    }
+
     if (!response.ok || status !== "20000000") {
       const body = await response.text();
-      throw new Error(
-        `query failed http=${response.status} status=${status || "missing"} message=${message || "unknown"} logId=${logId || "unknown"} body=${body.slice(0, 500)}`
+      throw new DoubaoAucError(
+        `query failed http=${response.status} status=${status || "missing"} message=${message || "unknown"} logId=${logId || "unknown"} body=${body.slice(0, 500)}`,
+        "query",
+        response.status,
+        status,
+        logId
       );
     }
 
     const data = (await response.json()) as DoubaoQueryResponse;
 
-    return extractDoubaoText(data);
+    return {
+      text: extractDoubaoText(data),
+      logId,
+      statusCode: status
+    };
   }
 
   throw new Error("query timeout");
@@ -289,13 +319,16 @@ function buildDoubaoAudioPayload(params: {
   sampleRate: number;
   bits: number;
   channels: number;
-  language: string;
+  language?: string;
 }): DoubaoAudioPayload {
   const payload: DoubaoAudioPayload = {
     url: params.sourceUrl,
-    format: toDoubaoAucFormat(params.audioFormat),
-    language: params.language
+    format: toDoubaoAucFormat(params.audioFormat)
   };
+
+  if (params.language) {
+    payload.language = params.language;
+  }
 
   if (params.audioFormat === "pcm") {
     payload.codec = "raw";
@@ -332,10 +365,26 @@ function toDoubaoAucFormat(audioFormat: "pcm" | "wav" | "mp3" | "ogg") {
 
 function normalizeDoubaoLanguage(language?: string) {
   if (!language || language === "zh") {
-    return "zh-CN";
+    return undefined;
   }
 
   return language;
+}
+
+function statusForDoubaoCode(statusCode: string) {
+  if (statusCode === "20000000") {
+    return "ok";
+  }
+
+  if (statusCode === "20000003") {
+    return "silent_audio";
+  }
+
+  if (statusCode) {
+    return `doubao_${statusCode}`;
+  }
+
+  return "empty_response";
 }
 
 function safeLogUrlPath(value: string) {

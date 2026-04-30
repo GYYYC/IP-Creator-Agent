@@ -94,8 +94,8 @@ type BlobUploadOutcome = {
   message?: string;
 };
 
-type TranscriptionAudioUploadResult = {
-  blob: BlobUploadResult;
+type TranscriptionAudioFileResult = {
+  file: File;
   fileName: string;
   contentType: string;
   audioFormat: "wav";
@@ -340,17 +340,6 @@ function safeUploadPath(fileName: string) {
   const safeName = fileName.replace(/[^\w.\-]+/g, "_");
 
   return `doctor/videos/${Date.now()}-${safeName || "video.mp4"}`;
-}
-
-function safeAudioUploadPath(fileName: string) {
-  const baseName = fileName.replace(/\.[^.]+$/, "");
-  const safeName = baseName.replace(/[^\w.\-]+/g, "_");
-  const suffix =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-  return `doctor/audio/${Date.now()}-${suffix}-${safeName || "audio"}.wav`;
 }
 
 function blobUploadTimeoutMs(fileSize: number) {
@@ -795,55 +784,7 @@ async function uploadVideoWithManualMultipart(
   return blob;
 }
 
-async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadResult> {
-  const controller = new AbortController();
-  const pathname = safeAudioUploadPath(file.name);
-  const contentType = file.type || "audio/wav";
-
-  if (file.size > MANUAL_MULTIPART_THRESHOLD_BYTES) {
-    const token = await retrieveBlobClientToken({
-      pathname,
-      multipart: true,
-      file,
-      uploadClient: "doctor-audio-v1-manual-multipart",
-      kind: "doctor-audio"
-    });
-    const uploader = await createMultipartUploader(pathname, {
-      access: "public",
-      token,
-      contentType,
-      abortSignal: controller.signal
-    });
-    const parts = [];
-    let partNumber = 1;
-
-    for (let offset = 0; offset < file.size; offset += MANUAL_MULTIPART_PART_BYTES) {
-      const end = Math.min(file.size, offset + MANUAL_MULTIPART_PART_BYTES);
-      const part = await uploader.uploadPart(partNumber, file.slice(offset, end, contentType));
-      parts.push(part);
-      partNumber += 1;
-    }
-
-    return uploader.complete(parts);
-  }
-
-  return upload(pathname, file, {
-    access: "public",
-    contentType,
-    handleUploadUrl: "/api/uploads/blob",
-    multipart: false,
-    abortSignal: controller.signal,
-    clientPayload: JSON.stringify({
-      uploadClient: "doctor-audio-v1-single-put",
-      kind: "doctor-audio",
-      fileName: file.name,
-      sizeBytes: file.size,
-      contentType
-    })
-  });
-}
-
-async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionAudioUploadResult | null> {
+async function prepareTranscriptionAudioFile(file: File): Promise<TranscriptionAudioFileResult | null> {
   try {
     const audioFile = await extractWavAudioFile(file);
 
@@ -851,10 +792,8 @@ async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionA
       return null;
     }
 
-    const blob = await uploadTranscriptionAudioToBlob(audioFile);
-
     return {
-      blob,
+      file: audioFile,
       fileName: audioFile.name,
       contentType: audioFile.type || "audio/wav",
       audioFormat: "wav",
@@ -978,74 +917,50 @@ function writeAscii(view: DataView, offset: number, value: string) {
 
 async function transcribeVideoFile(
   file: File,
-  durationSeconds: number,
-  blob: BlobUploadResult | null
+  durationSeconds: number
 ): Promise<VideoTranscript> {
-  const audio = await prepareTranscriptionAudioBlob(file);
+  const audio = await prepareTranscriptionAudioFile(file);
 
-  if (audio?.blob.url) {
-    try {
-      return await postJson<VideoTranscript>("/api/doctor/transcribe", {
-        url: audio.blob.downloadUrl || audio.blob.url,
-        fileName: audio.fileName,
-        contentType: audio.contentType,
-        audioFormat: audio.audioFormat,
-        sampleRate: audio.sampleRate,
-        channels: audio.channels,
-        bits: audio.bits,
-        durationSeconds
-      });
-    } catch (error) {
-      console.warn(
-        `[Doctor] audio blob transcription failed: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`
-      );
-    }
-  }
-
-  if (blob?.url) {
-    try {
-      return await postJson<VideoTranscript>("/api/doctor/transcribe", {
-        url: blob.url,
-        storageKey: blob.pathname,
-        fileName: file.name,
-        contentType: file.type,
-        durationSeconds
-      });
-    } catch (error) {
-      return {
-        fileName: file.name,
-        text: "",
-        durationSeconds,
-        estimatedWordCount: 0,
-        status: "request_error",
-        url: blob.url,
-        message: error instanceof Error ? error.message : "这次没有拿到口播转写。"
-      };
-    }
-  }
-
-  if (file.size > DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES) {
+  if (!audio?.file) {
     return {
       fileName: file.name,
       text: "",
       durationSeconds,
       estimatedWordCount: 0,
-      status: "blob_upload_failed",
-      message: "视频较大，且这次没有传到 Blob，先按关键画面和你的说明分析。"
+      status: "audio_extraction_failed",
+      message: "没有从视频中提取到可识别音频，这次先按关键画面和你的说明分析。"
+    };
+  }
+
+  if (audio.file.size > DIRECT_TRANSCRIPTION_FILE_LIMIT_BYTES) {
+    return {
+      fileName: audio.fileName,
+      text: "",
+      durationSeconds,
+      estimatedWordCount: 0,
+      status: "audio_too_large_for_direct_asr",
+      message: "提取出的音频超过当前直传限制，这次先按关键画面和你的说明分析。"
     };
   }
 
   try {
     const formData = new FormData();
-    formData.append("file", file, file.name);
+    formData.append("file", audio.file, audio.fileName);
     formData.append("durationSeconds", String(durationSeconds || 0));
+    formData.append("audioFormat", audio.audioFormat);
+    formData.append("sampleRate", String(audio.sampleRate));
+    formData.append("channels", String(audio.channels));
+    formData.append("bits", String(audio.bits));
 
     return await postFormData<VideoTranscript>("/api/doctor/transcribe", formData);
   } catch (error) {
+    console.warn(
+      `[Doctor] direct audio transcription failed: ${
+        error instanceof Error ? error.message : "unknown error"
+      }`
+    );
     return {
-      fileName: file.name,
+      fileName: audio.fileName,
       text: "",
       durationSeconds,
       estimatedWordCount: 0,
@@ -1308,7 +1223,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
         }
 
         setMessage(`正在识别 ${file.name} 的口播`);
-        const transcript = await transcribeVideoFile(file, metadata.durationSeconds, blob);
+        const transcript = await transcribeVideoFile(file, metadata.durationSeconds);
         audioTranscripts.push(transcript);
 
         if (transcript.text.trim()) {

@@ -255,6 +255,7 @@ async function fetchTranscriptionSource(url: string) {
 
 export async function transcribeAudioFile(params: {
   file: File;
+  sourceUrl?: string;
   language?: string;
   audioFormat?: TranscriptionAudioFormat;
   sampleRate?: number;
@@ -296,14 +297,25 @@ export async function transcribeAudioFile(params: {
       };
     }
 
-    return transcribeWithDoubaoAsr({
-      audioFormat,
-      sampleRate: params.sampleRate,
-      channels: params.channels,
-      bits: params.bits,
-      language: params.language,
-      fileName: params.file.name
-    });
+    if (params.sourceUrl) {
+      return transcribeWithDoubaoAsr({
+        sourceUrl: params.sourceUrl,
+        audioFormat,
+        sampleRate: params.sampleRate,
+        channels: params.channels,
+        bits: params.bits,
+        language: params.language,
+        fileName: params.file.name
+      });
+    }
+
+    console.warn("[Doubao ASR] transcription skipped: Doubao AUC requires a source URL.");
+    return {
+      text: "",
+      model,
+      status: "missing_source_url"
+    };
+
   }
 
   if (!apiKey) {
@@ -558,6 +570,10 @@ function inferDoubaoAudioFormatFromName(fileName: string, contentType?: string):
   }
 
   return null;
+}
+
+export function usesDoubaoTranscriptionProvider() {
+  return getTranscriptionProvider() === "doubao";
 }
 
 export async function callJsonModel(params: {
