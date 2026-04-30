@@ -254,7 +254,6 @@ export async function transcribeAudioFile(params: {
     }
 
     return transcribeWithDoubaoAsr({
-      audio: Buffer.from(await params.file.arrayBuffer()),
       audioFormat,
       sampleRate: params.sampleRate,
       channels: params.channels,
@@ -358,6 +357,28 @@ export async function transcribeAudioUrl(params: {
   channels?: number;
   bits?: number;
 }) {
+  if (getTranscriptionProvider() === "doubao") {
+    const audioFormat = params.audioFormat || inferDoubaoAudioFormatFromName(params.fileName, params.contentType);
+
+    if (!audioFormat) {
+      return {
+        text: "",
+        model: getTranscriptionModel(),
+        status: "unsupported_audio_format"
+      };
+    }
+
+    return transcribeWithDoubaoAsr({
+      sourceUrl: params.url,
+      audioFormat,
+      sampleRate: params.sampleRate,
+      channels: params.channels,
+      bits: params.bits,
+      language: params.language,
+      fileName: params.fileName
+    });
+  }
+
   try {
     const response = await fetchTranscriptionSource(params.url);
 
@@ -406,8 +427,31 @@ export async function transcribeAudioBlobPath(params: {
   sampleRate?: number;
   channels?: number;
   bits?: number;
+  sourceUrl?: string;
 }) {
   try {
+    if (getTranscriptionProvider() === "doubao" && params.sourceUrl) {
+      const audioFormat = params.audioFormat || inferDoubaoAudioFormatFromName(params.fileName, params.contentType);
+
+      if (!audioFormat) {
+        return {
+          text: "",
+          model: getTranscriptionModel(),
+          status: "unsupported_audio_format"
+        };
+      }
+
+      return transcribeWithDoubaoAsr({
+        sourceUrl: params.sourceUrl,
+        audioFormat,
+        sampleRate: params.sampleRate,
+        channels: params.channels,
+        bits: params.bits,
+        language: params.language,
+        fileName: params.fileName
+      });
+    }
+
     const result = await get(params.pathname, {
       access: "private",
       useCache: false
@@ -447,8 +491,12 @@ export async function transcribeAudioBlobPath(params: {
 }
 
 function inferDoubaoAudioFormat(file: File): TranscriptionAudioFormat | null {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
+  return inferDoubaoAudioFormatFromName(file.name, file.type);
+}
+
+function inferDoubaoAudioFormatFromName(fileName: string, contentType?: string): TranscriptionAudioFormat | null {
+  const type = (contentType || "").toLowerCase();
+  const name = fileName.toLowerCase();
 
   if (type.includes("pcm") || name.endsWith(".pcm")) {
     return "pcm";

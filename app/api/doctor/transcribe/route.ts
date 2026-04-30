@@ -1,4 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/agent/http";
+import { createSignedBlobSourceUrl } from "@/lib/agent/blob-source-token";
 import { transcribeAudioBlobPath, transcribeAudioFile, transcribeAudioUrl } from "@/lib/agent/llm";
 
 export const runtime = "nodejs";
@@ -31,6 +32,11 @@ export async function POST(request: Request) {
           pathname: storageKey,
           fileName,
           contentType: typeof body.contentType === "string" ? body.contentType : undefined,
+          sourceUrl: createSignedBlobSourceUrl({
+            origin: getRequestOrigin(request),
+            pathname: storageKey,
+            contentType: typeof body.contentType === "string" ? body.contentType : undefined
+          }),
           language: "zh",
           audioFormat,
           sampleRate,
@@ -112,6 +118,14 @@ function parsePositiveNumber(value: unknown) {
   const parsed = Number(value || 0);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function getRequestOrigin(request: Request) {
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const host = forwardedHost || request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+
+  return host ? `${forwardedProto}://${host}` : new URL(request.url).origin;
 }
 
 function estimateWordCount(text: string) {
