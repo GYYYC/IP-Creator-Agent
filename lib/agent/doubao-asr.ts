@@ -74,6 +74,7 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     console.info(
       `[Doubao ASR] submitting AUC task: resource=${resourceId} requestId=${requestId} format=${params.audioFormat} file=${params.fileName ?? "unknown"} sourcePath=${safeLogUrlPath(params.sourceUrl)}`
     );
+    await verifySourceUrl(params.sourceUrl);
 
     await submitDoubaoTask({
       endpoint: submitEndpoint,
@@ -117,6 +118,37 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
       model: resourceId,
       status: "request_error"
     };
+  }
+}
+
+async function verifySourceUrl(sourceUrl: string) {
+  try {
+    const response = await fetchWithTimeout(sourceUrl, {
+      method: "HEAD",
+      cache: "no-store"
+    });
+
+    console.info(
+      `[Doubao ASR] source self-check: status=${response.status} type=${response.headers.get("content-type") || "unknown"} length=${response.headers.get("content-length") || "unknown"} path=${safeLogUrlPath(sourceUrl)}`
+    );
+
+    if (!response.ok) {
+      const fallback = await fetchWithTimeout(sourceUrl, {
+        method: "GET",
+        headers: {
+          Range: "bytes=0-31"
+        },
+        cache: "no-store"
+      });
+      fallback.body?.cancel().catch(() => undefined);
+      console.info(
+        `[Doubao ASR] source GET fallback: status=${fallback.status} type=${fallback.headers.get("content-type") || "unknown"} length=${fallback.headers.get("content-length") || "unknown"} path=${safeLogUrlPath(sourceUrl)}`
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[Doubao ASR] source self-check failed: ${error instanceof Error ? error.message : "unknown error"} path=${safeLogUrlPath(sourceUrl)}`
+    );
   }
 }
 

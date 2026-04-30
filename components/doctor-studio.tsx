@@ -98,7 +98,7 @@ type TranscriptionAudioUploadResult = {
   blob: BlobUploadResult;
   fileName: string;
   contentType: string;
-  audioFormat: "pcm";
+  audioFormat: "wav";
   sampleRate: number;
   channels: number;
   bits: number;
@@ -320,7 +320,7 @@ function safeAudioUploadPath(fileName: string) {
   const baseName = fileName.replace(/\.[^.]+$/, "");
   const safeName = baseName.replace(/[^\w.\-]+/g, "_");
 
-  return `doctor/audio/${Date.now()}-${safeName || "audio"}.pcm`;
+  return `doctor/audio/${Date.now()}-${safeName || "audio"}.wav`;
 }
 
 function blobUploadTimeoutMs(fileSize: number) {
@@ -768,6 +768,7 @@ async function uploadVideoWithManualMultipart(
 async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadResult> {
   const controller = new AbortController();
   const pathname = safeAudioUploadPath(file.name);
+  const contentType = file.type || "audio/wav";
 
   if (file.size > MANUAL_MULTIPART_THRESHOLD_BYTES) {
     const token = await retrieveBlobClientToken({
@@ -780,7 +781,7 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
     const uploader = await createMultipartUploader(pathname, {
       access: "private",
       token,
-      contentType: file.type || "audio/pcm",
+      contentType,
       abortSignal: controller.signal
     });
     const parts = [];
@@ -788,7 +789,7 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
 
     for (let offset = 0; offset < file.size; offset += MANUAL_MULTIPART_PART_BYTES) {
       const end = Math.min(file.size, offset + MANUAL_MULTIPART_PART_BYTES);
-      const part = await uploader.uploadPart(partNumber, file.slice(offset, end, file.type || "audio/pcm"));
+      const part = await uploader.uploadPart(partNumber, file.slice(offset, end, contentType));
       parts.push(part);
       partNumber += 1;
     }
@@ -798,7 +799,7 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
 
   return upload(pathname, file, {
     access: "private",
-    contentType: file.type || "audio/pcm",
+    contentType,
     handleUploadUrl: "/api/uploads/blob",
     multipart: false,
     abortSignal: controller.signal,
@@ -807,14 +808,14 @@ async function uploadTranscriptionAudioToBlob(file: File): Promise<BlobUploadRes
       kind: "doctor-audio",
       fileName: file.name,
       sizeBytes: file.size,
-      contentType: file.type || "audio/pcm"
+      contentType
     })
   });
 }
 
 async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionAudioUploadResult | null> {
   try {
-    const audioFile = await extractPcmAudioFile(file);
+    const audioFile = await extractWavAudioFile(file);
 
     if (!audioFile) {
       return null;
@@ -825,8 +826,8 @@ async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionA
     return {
       blob,
       fileName: audioFile.name,
-      contentType: audioFile.type || "audio/pcm",
-      audioFormat: "pcm",
+      contentType: audioFile.type || "audio/wav",
+      audioFormat: "wav",
       sampleRate: TRANSCRIPTION_AUDIO_SAMPLE_RATE,
       channels: TRANSCRIPTION_AUDIO_CHANNELS,
       bits: TRANSCRIPTION_AUDIO_BITS
@@ -841,7 +842,7 @@ async function prepareTranscriptionAudioBlob(file: File): Promise<TranscriptionA
   }
 }
 
-async function extractPcmAudioFile(file: File): Promise<File | null> {
+async function extractWavAudioFile(file: File): Promise<File | null> {
   const AudioContextConstructor =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -861,10 +862,16 @@ async function extractPcmAudioFile(file: File): Promise<File | null> {
     }
 
     const pcm = resampleToMonoPcm16(audioBuffer, TRANSCRIPTION_AUDIO_SAMPLE_RATE);
+    const wav = wrapPcm16InWav({
+      pcm,
+      sampleRate: TRANSCRIPTION_AUDIO_SAMPLE_RATE,
+      channels: TRANSCRIPTION_AUDIO_CHANNELS,
+      bits: TRANSCRIPTION_AUDIO_BITS
+    });
     const safeBaseName = file.name.replace(/\.[^.]+$/, "") || "video";
 
-    return new File([pcm], `${safeBaseName}.pcm`, {
-      type: "audio/pcm"
+    return new File([wav], `${safeBaseName}.wav`, {
+      type: "audio/wav"
     });
   } finally {
     await audioContext.close().catch(() => undefined);
@@ -899,6 +906,44 @@ function resampleToMonoPcm16(audioBuffer: AudioBuffer, targetSampleRate: number)
   }
 
   return output;
+}
+
+function wrapPcm16InWav(params: {
+  pcm: ArrayBuffer;
+  sampleRate: number;
+  channels: number;
+  bits: number;
+}) {
+  const headerBytes = 44;
+  const dataBytes = params.pcm.byteLength;
+  const output = new ArrayBuffer(headerBytes + dataBytes);
+  const view = new DataView(output);
+  const bytesPerSample = params.bits / 8;
+  const blockAlign = params.channels * bytesPerSample;
+  const byteRate = params.sampleRate * blockAlign;
+
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataBytes, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, params.channels, true);
+  view.setUint32(24, params.sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, params.bits, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataBytes, true);
+  new Uint8Array(output, headerBytes).set(new Uint8Array(params.pcm));
+
+  return output;
+}
+
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
 }
 
 async function transcribeVideoFile(
