@@ -72,7 +72,7 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     const startedAt = Date.now();
 
     console.info(
-      `[Doubao ASR] submitting AUC task: resource=${resourceId} requestId=${requestId} format=${params.audioFormat} file=${params.fileName ?? "unknown"}`
+      `[Doubao ASR] submitting AUC task: resource=${resourceId} requestId=${requestId} format=${params.audioFormat} file=${params.fileName ?? "unknown"} sourcePath=${safeLogUrlPath(params.sourceUrl)}`
     );
 
     await submitDoubaoTask({
@@ -260,6 +260,16 @@ function normalizeDoubaoLanguage(language?: string) {
   }
 
   return language;
+}
+
+function safeLogUrlPath(value: string) {
+  try {
+    const url = new URL(value);
+
+    return url.pathname;
+  } catch {
+    return "invalid-url";
+  }
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit) {

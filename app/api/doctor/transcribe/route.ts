@@ -35,7 +35,8 @@ export async function POST(request: Request) {
           sourceUrl: createSignedBlobSourceUrl({
             origin: getRequestOrigin(request),
             pathname: storageKey,
-            contentType: typeof body.contentType === "string" ? body.contentType : undefined
+            contentType: typeof body.contentType === "string" ? body.contentType : undefined,
+            fileName
           }),
           language: "zh",
           audioFormat,

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 type BlobSourcePayload = {
   pathname: string;
   contentType?: string;
+  fileName?: string;
   exp: number;
 };
 
@@ -12,20 +13,30 @@ export function createSignedBlobSourceUrl(params: {
   origin: string;
   pathname: string;
   contentType?: string;
+  fileName?: string;
 }) {
   const payload: BlobSourcePayload = {
     pathname: params.pathname,
     contentType: params.contentType,
+    fileName: params.fileName,
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
   };
   const token = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   const sig = signToken(token);
-  const url = new URL("/api/doctor/audio-source", params.origin);
+  const fileName = safeSourceFileName(params.fileName || params.pathname);
+  const url = new URL(`/api/doctor/audio-source/${encodeURIComponent(fileName)}`, params.origin);
 
   url.searchParams.set("token", token);
   url.searchParams.set("sig", sig);
 
   return url.toString();
+}
+
+function safeSourceFileName(fileName: string) {
+  const name = fileName.split("/").pop() || "audio.pcm";
+  const safeName = name.replace(/[^\w.\-]+/g, "_");
+
+  return /\.[a-z0-9]+$/i.test(safeName) ? safeName : `${safeName || "audio"}.pcm`;
 }
 
 export function verifyBlobSourceToken(token: string, signature: string) {
