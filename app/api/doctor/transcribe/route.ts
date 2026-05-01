@@ -81,6 +81,7 @@ export async function POST(request: Request) {
       estimatedWordCount: estimateWordCount(text),
       model: result.model,
       status: result.status,
+      utterances: transcriptionUtterances(result),
       ...transcriptionDiagnostics(result),
       message:
         result.status === "ok"
@@ -131,6 +132,7 @@ export async function POST(request: Request) {
     estimatedWordCount: estimateWordCount(text),
     model: result.model,
     status: result.status,
+    utterances: transcriptionUtterances(result),
     ...transcriptionDiagnostics(result),
     message:
       result.status === "ok"
@@ -229,6 +231,51 @@ function transcriptionDiagnostics(result: unknown) {
   }
 
   return diagnostics;
+}
+
+function transcriptionUtterances(result: unknown) {
+  const record = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+  const utterances = Array.isArray(record.utterances) ? record.utterances : [];
+
+  return utterances
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const utterance = item as Record<string, unknown>;
+      const text = typeof utterance.text === "string" ? utterance.text.trim() : "";
+      const startTimeMs =
+        typeof utterance.startTimeMs === "number" ? utterance.startTimeMs : undefined;
+      const endTimeMs =
+        typeof utterance.endTimeMs === "number" ? utterance.endTimeMs : undefined;
+      const startTimeSeconds =
+        typeof utterance.startTimeSeconds === "number"
+          ? utterance.startTimeSeconds
+          : typeof startTimeMs === "number"
+            ? Math.round((startTimeMs / 1000) * 10) / 10
+            : undefined;
+      const endTimeSeconds =
+        typeof utterance.endTimeSeconds === "number"
+          ? utterance.endTimeSeconds
+          : typeof endTimeMs === "number"
+            ? Math.round((endTimeMs / 1000) * 10) / 10
+            : startTimeSeconds;
+
+      if (!text || typeof startTimeSeconds !== "number" || typeof endTimeSeconds !== "number") {
+        return null;
+      }
+
+      return {
+        text,
+        startTimeMs:
+          typeof startTimeMs === "number" ? startTimeMs : Math.round(startTimeSeconds * 1000),
+        endTimeMs: typeof endTimeMs === "number" ? endTimeMs : Math.round(endTimeSeconds * 1000),
+        startTimeSeconds,
+        endTimeSeconds
+      };
+    })
+    .filter(Boolean);
 }
 
 function transcriptionMessage(status: string, result: unknown) {

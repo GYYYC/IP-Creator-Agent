@@ -200,10 +200,12 @@ comment_direction:
 4. 留存曲线截图、图文截图、关键帧截图都可以作为本次主要判断依据。用户可以只让你分析其中一类素材，不要强行要求完整作品。
 5. 如果用户只上传视频文件且没有 visualInputs，你只能把文件名当作素材线索，不得声称已经看完、听完、逐帧分析或自动理解了完整视频。
 6. 如果 session.input.audioTranscripts 有内容，说明你已经拿到了原视频口播稿。视频诊断必须优先结合口播稿理解主旨、信息推进和表达密度；不得只看关键帧下判断。
-7. 如果口播稿为空或状态不是 ok，不得声称已经听完视频。可以基于关键帧、字幕、notes、stats 和文件名分析，并说明本次判断依据。
-8. 用户可以不提供留存曲线。没有留存曲线时，必须基于 notes、analysisFocus、stats、文件名、关键帧、口播稿和用户描述分析其指定的开头、转折、方法段、首图、正文、标题或结尾。
-9. 如果 notes 或 analysisFocus 写了“帮我看某一段/某一屏/某个问题”，必须围绕该位置给结论，不要强行改成留存曲线分析。
-10. 所有页面文案面向用户当前作品，不要说“系统”“模块”“我无法分析文件”。可以温和说明“这次先按你给的素材判断”。
+7. 如果 audioTranscripts[].utterances 有内容，说明口播稿带有精确时间。必须使用 utterances 的 startTimeSeconds/endTimeSeconds 判断每句话出现的时间、信息推进速度、转折是否过晚、方法段是否太迟、结尾行动是否清楚。timeline 的 label 要优先写成“0-3s”“12-18s”这类具体时间段。
+8. 有带时间口播稿时，不得只引用整段 transcript.text 下结论；必须至少引用 1 个具体口播时间段作为 evidence 或 timeline 依据，例如“12-18s 还在铺背景”。如果 transcript.text 和 utterances 都存在，以 utterances 判断时间，以 transcript.text 理解整体主旨。
+9. 如果口播稿为空或状态不是 ok，不得声称已经听完视频。可以基于关键帧、字幕、notes、stats 和文件名分析，并说明本次判断依据。
+10. 用户可以不提供留存曲线。没有留存曲线时，必须基于 notes、analysisFocus、stats、文件名、关键帧、口播稿和用户描述分析其指定的开头、转折、方法段、首图、正文、标题或结尾。
+11. 如果 notes 或 analysisFocus 写了“帮我看某一段/某一屏/某个问题”，必须围绕该位置给结论，不要强行改成留存曲线分析。
+12. 所有页面文案面向用户当前作品，不要说“系统”“模块”“我无法分析文件”。可以温和说明“这次先按你给的素材判断”。
 
 重写脚本规则：
 - 当 session.input.revisionRequests 或用户回答里出现“重写、改写、按结论写脚本、生成脚本、这一版脚本”等意图时，output 必须额外包含 rewrittenScript。
@@ -211,6 +213,7 @@ comment_direction:
 - 必须优先保留原视频想表达的主旨，再根据诊断结论调整开头、信息顺序、转折、方法段和结尾。
 - 必须使用 session.input.scriptLengthGuide 控制篇幅。若 basis=transcript，字数尽量落在 minWordCount 与 maxWordCount 之间；若 basis=duration，按 targetDurationSeconds 的时长写；不要明显长于原作品。
 - 如果有 audioTranscripts，要根据原口播内容重写，不要把内容换成另一个选题。
+- 如果有 audioTranscripts[].utterances，rewrittenScript.segments 的 label 要尽量对应原视频时间段，例如“原 0-3 秒改成”“原 12-18 秒压缩为”。重写时要明确把过晚出现的信息提前，而不是只润色句子。
 - 如果没有 audioTranscripts，只能根据 notes、关键帧、字幕和数据重写，并在 evidence 里说明依据。
 - rewrittenScript.segments 最多 5 段，每段包含 label、script、note；label 用用户能看懂的位置，例如“开头 0-3 秒”“方法段”“结尾互动”。
 - rewrittenScript.targetWordCountRange 写成“约 220-320 字”这类短文本。
@@ -222,6 +225,8 @@ comment_direction:
 - 中段关键帧优先判断信息是否继续推进，还是重复情绪、重复场景、重复结论。
 - 结尾关键帧优先判断是否有明确收束、评论入口、收藏理由或下一步动作。
 - 如果 visualInputs 的 label 标明 frameSelectionSource=retention 或 evidence 中出现留存图，优先围绕掉点、回升、异常平台期解释对应画面可能造成的影响。
+- 如果同时有关键帧时间和 utterances 时间，必须把画面与口播对齐判断：同一时间段里画面是否支撑了这句话，是否出现“画面在变但话术没推进”或“话术进入方法但画面仍像背景”的问题。
+- 不得编造 transcript 或关键帧里没有出现的精确时间。只能引用 utterances 的时间、visualInputs label 的时间、用户 notes/stats 中写明的时间。
 - timeline 每一项都要落到具体时间点或具体位置，不要写泛泛的“开头/中间/结尾”。
 图文重点分析首图、标题、正文结构、收藏/评论转化；视频重点分析开头停留、信息进入速度、转折、方法段、结尾动作。`;
   }

@@ -13,12 +13,25 @@ type DoubaoAsrOptions = {
 type DoubaoQueryResponse = {
   result?: {
     text?: string;
-    utterances?: Array<{ text?: string }>;
+    utterances?: Array<{
+      text?: string;
+      start_time?: number;
+      end_time?: number;
+    }>;
   };
+};
+
+export type TimedTranscriptUtterance = {
+  text: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
 };
 
 export type DoubaoTranscriptionResult = {
   text: string;
+  utterances?: TimedTranscriptUtterance[];
   model: string;
   status: string;
   provider: "doubao_auc";
@@ -138,13 +151,15 @@ export async function transcribeWithDoubaoAsr(params: DoubaoAsrOptions) {
     latestLogId = queryResult.logId || latestLogId;
     latestStatusCode = queryResult.statusCode || latestStatusCode;
     const text = queryResult.text;
+    const utterances = queryResult.utterances;
 
     console.info(
-      `[Doubao ASR] completed AUC task: resource=${resourceId} requestId=${requestId} chars=${text.length}`
+      `[Doubao ASR] completed AUC task: resource=${resourceId} requestId=${requestId} chars=${text.length} utterances=${utterances.length}`
     );
 
     return {
       text: text.trim(),
+      utterances: utterances.length ? utterances : undefined,
       model: resourceId,
       status: text.trim()
         ? "ok"
@@ -219,7 +234,8 @@ async function submitDoubaoTask(params: {
       request: {
         model_name: "bigmodel",
         enable_itn: true,
-        enable_punc: true
+        enable_punc: true,
+        show_utterances: true
       }
     })
   });
@@ -272,6 +288,7 @@ async function queryDoubaoTask(params: {
     if (status === "20000003") {
       return {
         text: "",
+        utterances: [],
         logId,
         statusCode: status
       };
@@ -292,6 +309,7 @@ async function queryDoubaoTask(params: {
 
     return {
       text: extractDoubaoText(data),
+      utterances: extractDoubaoUtterances(data),
       logId,
       statusCode: status
     };
@@ -356,6 +374,30 @@ function extractDoubaoText(payload: DoubaoQueryResponse) {
       ?.map((item) => (typeof item.text === "string" ? item.text : ""))
       .join("")
       .trim() || ""
+  );
+}
+
+function extractDoubaoUtterances(payload: DoubaoQueryResponse): TimedTranscriptUtterance[] {
+  return (
+    payload.result?.utterances
+      ?.map((item) => {
+        const text = typeof item.text === "string" ? item.text.trim() : "";
+        const startTimeMs = typeof item.start_time === "number" ? item.start_time : 0;
+        const endTimeMs = typeof item.end_time === "number" ? item.end_time : startTimeMs;
+
+        if (!text) {
+          return null;
+        }
+
+        return {
+          text,
+          startTimeMs,
+          endTimeMs,
+          startTimeSeconds: Math.round((startTimeMs / 1000) * 10) / 10,
+          endTimeSeconds: Math.round((endTimeMs / 1000) * 10) / 10
+        };
+      })
+      .filter((item): item is TimedTranscriptUtterance => Boolean(item)) || []
   );
 }
 

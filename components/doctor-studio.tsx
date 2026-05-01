@@ -71,12 +71,21 @@ type VideoMetadata = {
   height: number;
 };
 
+type TranscriptUtterance = {
+  text: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+};
+
 type VideoTranscript = {
   fileName: string;
   text: string;
   durationSeconds: number;
   estimatedWordCount: number;
   status: string;
+  utterances?: TranscriptUtterance[];
   url?: string;
   message?: string;
 };
@@ -364,6 +373,77 @@ function countTextUnits(text: string) {
   return cjkCount + latinCount;
 }
 
+function normalizeTranscriptUtterances(value: unknown): TranscriptUtterance[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item): TranscriptUtterance | null => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const text = typeof record.text === "string" ? record.text.trim() : "";
+      const startTimeSeconds =
+        typeof record.startTimeSeconds === "number"
+          ? record.startTimeSeconds
+          : typeof record.startTimeMs === "number"
+            ? Math.round((record.startTimeMs / 1000) * 10) / 10
+            : undefined;
+      const endTimeSeconds =
+        typeof record.endTimeSeconds === "number"
+          ? record.endTimeSeconds
+          : typeof record.endTimeMs === "number"
+            ? Math.round((record.endTimeMs / 1000) * 10) / 10
+            : startTimeSeconds;
+
+      if (!text || typeof startTimeSeconds !== "number" || typeof endTimeSeconds !== "number") {
+        return null;
+      }
+
+      return {
+        text,
+        startTimeSeconds,
+        endTimeSeconds,
+        startTimeMs:
+          typeof record.startTimeMs === "number"
+            ? record.startTimeMs
+            : Math.round(startTimeSeconds * 1000),
+        endTimeMs:
+          typeof record.endTimeMs === "number"
+            ? record.endTimeMs
+            : Math.round(endTimeSeconds * 1000)
+      };
+    })
+    .filter((item): item is TranscriptUtterance => Boolean(item));
+}
+
+function formatTranscriptTime(seconds: number) {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatTranscriptTimeRange(utterance: TranscriptUtterance) {
+  return `${formatTranscriptTime(utterance.startTimeSeconds)}-${formatTranscriptTime(
+    utterance.endTimeSeconds
+  )}`;
+}
+
+function transcriptTextForArtifact(transcript: VideoTranscript) {
+  if (!transcript.utterances?.length) {
+    return transcript.text;
+  }
+
+  return transcript.utterances
+    .map((utterance) => `[${formatTranscriptTimeRange(utterance)}] ${utterance.text}`)
+    .join("\n");
+}
+
 function estimateWordRangeFromDuration(durationSeconds: number) {
   const duration = Math.max(0, durationSeconds);
 
@@ -457,6 +537,7 @@ function getSessionTranscripts(session: ApiSession | null): VideoTranscript[] {
             ? record.estimatedWordCount
             : countTextUnits(text),
         status: typeof record.status === "string" ? record.status : "ok",
+        utterances: normalizeTranscriptUtterances(record.utterances),
         url: typeof record.url === "string" ? record.url : undefined,
         message: typeof record.message === "string" ? record.message : undefined
       };
@@ -1231,12 +1312,13 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             kind: "text",
             mimeType: "text/plain",
             fileName: `${file.name} 口播稿.txt`,
-            extractedText: transcript.text,
+            extractedText: transcriptTextForArtifact(transcript),
             extractedJson: {
               sourceFileName: file.name,
               transcriptStatus: transcript.status,
               durationSeconds: metadata.durationSeconds,
-              estimatedWordCount: transcript.estimatedWordCount
+              estimatedWordCount: transcript.estimatedWordCount,
+              utterances: transcript.utterances ?? []
             }
           });
         }
@@ -1605,7 +1687,16 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
                 {transcripts.map((transcript) => (
                   <div key={transcript.fileName}>
                     <strong>{transcript.fileName}</strong>
-                    <p>{transcript.text}</p>
+                    {transcript.utterances?.length ? (
+                      transcript.utterances.map((utterance, index) => (
+                        <p key={`${utterance.startTimeMs}-${index}`}>
+                          <span>{formatTranscriptTimeRange(utterance)} </span>
+                          {utterance.text}
+                        </p>
+                      ))
+                    ) : (
+                      <p>{transcript.text}</p>
+                    )}
                   </div>
                 ))}
               </div>

@@ -175,8 +175,8 @@ function resultSchemaForModule(module: AgentSession["module"]) {
   "draft": {},
   "output": {
     "mainIssue": "这条作品当前最该优先修正的问题",
-    "evidence": "引用用户填写的说明、关键时间点、数据或文件名作为判断依据",
-    "timeline": [{ "label": "片段或位置", "title": "这一段的问题或优势", "description": "具体判断" }],
+    "evidence": "引用用户填写的说明、关键时间点、带时间口播稿、数据或文件名作为判断依据",
+    "timeline": [{ "label": "具体时间段或位置", "title": "这一段的问题或优势", "description": "具体判断" }],
     "actions": ["下一版具体怎么改"],
     "rewrittenScript": null
   },
