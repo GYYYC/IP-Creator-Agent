@@ -4,6 +4,7 @@ import { createMultipartUploader, upload } from "@vercel/blob/client";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
+type EvidenceTab = "transcript" | "timeline";
 
 type DoctorOutput = {
   mainIssue?: string;
@@ -1138,10 +1139,27 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>("transcript");
   const config = MODE_CONFIG[mode];
   const output = hasDoctorOutput(session?.output) ? session!.output : fallbackOutput;
   const scriptBody = getScriptBody(output);
   const transcripts = getSessionTranscripts(session);
+  const timelineItems = output.timeline ?? [];
+  const hasTranscriptEvidence = transcripts.length > 0;
+  const hasTimelineEvidence = timelineItems.length > 0;
+  const hasEvidence = hasTranscriptEvidence || hasTimelineEvidence;
+  const showEvidenceTabs = hasTranscriptEvidence && hasTimelineEvidence;
+  const activeEvidenceTab: EvidenceTab =
+    evidenceTab === "timeline" && hasTimelineEvidence
+      ? "timeline"
+      : hasTranscriptEvidence
+        ? "transcript"
+        : "timeline";
+  const evidenceTitle = showEvidenceTabs
+    ? "口播时间轴与掉点记录"
+    : hasTranscriptEvidence
+      ? "识别到的原视频内容"
+      : "掉点记录";
   const canAnalyze = stats.trim() || notes.trim() || contentFiles.length > 0 || dataFiles.length > 0;
 
   useEffect(() => {
@@ -1187,6 +1205,16 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       cancelled = true;
     };
   }, [initialSessionId]);
+
+  useEffect(() => {
+    if (evidenceTab === "transcript" && !hasTranscriptEvidence && hasTimelineEvidence) {
+      setEvidenceTab("timeline");
+    }
+
+    if (evidenceTab === "timeline" && !hasTimelineEvidence && hasTranscriptEvidence) {
+      setEvidenceTab("transcript");
+    }
+  }, [evidenceTab, hasTimelineEvidence, hasTranscriptEvidence]);
 
   function switchMode(nextMode: ContentMode) {
     if (nextMode === mode) {
@@ -1598,7 +1626,77 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
           {message ? <p className="muted">{message}</p> : null}
         </section>
 
-        <aside className="doctor-side-stack" ref={resultRef}>
+        {hasEvidence ? (
+          <section className="surface-card glass doctor-evidence-card">
+            <div className="doctor-evidence-head">
+              <div>
+                <span className="label">复盘证据</span>
+                <h3>{evidenceTitle}</h3>
+              </div>
+              {showEvidenceTabs ? (
+                <div aria-label="复盘证据" className="doctor-evidence-tabs" role="tablist">
+                  <button
+                    aria-selected={activeEvidenceTab === "transcript"}
+                    className={`mode-chip ${activeEvidenceTab === "transcript" ? "active" : ""}`}
+                    onClick={() => setEvidenceTab("transcript")}
+                    role="tab"
+                    type="button"
+                  >
+                    口播时间轴
+                  </button>
+                  <button
+                    aria-selected={activeEvidenceTab === "timeline"}
+                    className={`mode-chip ${activeEvidenceTab === "timeline" ? "active" : ""}`}
+                    onClick={() => setEvidenceTab("timeline")}
+                    role="tab"
+                    type="button"
+                  >
+                    掉点记录
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="doctor-evidence-scroll">
+              {activeEvidenceTab === "transcript" && hasTranscriptEvidence ? (
+                <div className="doctor-transcript-list">
+                  {transcripts.map((transcript) => (
+                    <div className="doctor-transcript-source" key={transcript.fileName}>
+                      <strong>{transcript.fileName}</strong>
+                      {transcript.utterances?.length ? (
+                        transcript.utterances.map((utterance, index) => (
+                          <p className="doctor-transcript-line" key={`${utterance.startTimeMs}-${index}`}>
+                            <span>{formatTranscriptTimeRange(utterance)}</span>
+                            {utterance.text}
+                          </p>
+                        ))
+                      ) : (
+                        <p className="doctor-transcript-line">{transcript.text}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {activeEvidenceTab === "timeline" && hasTimelineEvidence ? (
+                <div className="timeline doctor-evidence-timeline">
+                  {timelineItems.map((item, index) => (
+                    <div
+                      className={`timeline-item ${index === 1 ? "warning" : "success"}`}
+                      key={item.label}
+                    >
+                      <strong>{item.label}</strong>
+                      <div>{item.title}</div>
+                      <p>{item.description}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        <aside className="doctor-output-stack" ref={resultRef}>
           <section className="surface-card glass doctor-result-card">
             <div className="doctor-result-scroll">
               <span className="label">本次结论</span>
@@ -1679,71 +1777,31 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             </section>
           ) : null}
 
-          {transcripts.length ? (
-            <section className="surface-card glass doctor-transcript-card">
-              <span className="label">口播稿</span>
-              <h3>识别到的原视频内容</h3>
-              <div className="doctor-transcript-scroll">
-                {transcripts.map((transcript) => (
-                  <div key={transcript.fileName}>
-                    <strong>{transcript.fileName}</strong>
-                    {transcript.utterances?.length ? (
-                      transcript.utterances.map((utterance, index) => (
-                        <p key={`${utterance.startTimeMs}-${index}`}>
-                          <span>{formatTranscriptTimeRange(utterance)} </span>
-                          {utterance.text}
-                        </p>
-                      ))
-                    ) : (
-                      <p>{transcript.text}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {session ? (
-            <section className="surface-card glass doctor-followup-card">
-              <div>
-                <strong>继续问 Doctor</strong>
-                <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
-              </div>
-              <textarea
-                onChange={(event) => setFollowup(event.target.value)}
-                placeholder="例如：为什么你觉得 15 秒这里会掉？结尾应该怎么改得不生硬？"
-                rows={3}
-                value={followup}
-              />
-              <button
-                className="button-secondary"
-                disabled={!followup.trim() || loading}
-                onClick={handleFollowup}
-                type="button"
-              >
-                继续分析
-              </button>
-            </section>
-          ) : null}
         </aside>
-      </div>
 
-      <section className="surface-card glass result-panel">
-        <span className="label">{config.resultLabel}</span>
-        <h3>掉点记录</h3>
-        <div className="timeline">
-          {(output.timeline ?? []).map((item, index) => (
-            <div
-              className={`timeline-item ${index === 1 ? "warning" : "success"}`}
-              key={item.label}
-            >
-              <strong>{item.label}</strong>
-              <div>{item.title}</div>
-              <p>{item.description}</p>
+        {session ? (
+          <section className="surface-card glass doctor-followup-card">
+            <div>
+              <strong>继续问 Doctor</strong>
+              <p>对这次诊断有疑惑，或想单独拆某一帧、某一句、某个掉点。</p>
             </div>
-          ))}
-        </div>
-      </section>
+            <textarea
+              onChange={(event) => setFollowup(event.target.value)}
+              placeholder="例如：为什么你觉得 15 秒这里会掉？结尾应该怎么改得不生硬？"
+              rows={3}
+              value={followup}
+            />
+            <button
+              className="button-secondary"
+              disabled={!followup.trim() || loading}
+              onClick={handleFollowup}
+              type="button"
+            >
+              继续分析
+            </button>
+          </section>
+        ) : null}
+      </div>
     </>
   );
 }

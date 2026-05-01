@@ -1172,15 +1172,28 @@ svg {
 }
 
 .doctor-workbench-grid {
+  grid-template-columns: minmax(340px, 0.92fr) minmax(460px, 1.08fr);
+  grid-template-areas:
+    "input output"
+    "evidence output"
+    "evidence followup";
   align-items: start;
 }
 
-.doctor-input-card,
-.doctor-side-stack {
+.doctor-input-card {
+  grid-area: input;
   align-self: start;
 }
 
-.doctor-side-stack {
+.doctor-evidence-card {
+  grid-area: evidence;
+  align-self: start;
+  padding: 0;
+  overflow: hidden;
+}
+
+.doctor-output-stack {
+  grid-area: output;
   display: grid;
   min-width: 0;
   gap: 18px;
@@ -1218,7 +1231,85 @@ svg {
   background: rgba(5, 8, 13, 0.32);
 }
 
+.doctor-evidence-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.doctor-evidence-head h3 {
+  margin-top: 6px;
+}
+
+.doctor-evidence-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.doctor-evidence-tabs .mode-chip {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.doctor-evidence-scroll {
+  display: grid;
+  gap: 14px;
+  min-height: 220px;
+  max-height: 520px;
+  padding: 18px 22px 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.doctor-evidence-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.doctor-evidence-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(154, 197, 255, 0.22);
+}
+
+.doctor-transcript-list {
+  display: grid;
+  gap: 16px;
+}
+
+.doctor-transcript-source strong {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-strong);
+}
+
+.doctor-transcript-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.doctor-transcript-line + .doctor-transcript-line {
+  margin-top: 8px;
+}
+
+.doctor-transcript-line span {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .doctor-followup-card {
+  grid-area: followup;
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -1261,8 +1352,7 @@ svg {
   justify-self: start;
 }
 
-.doctor-script-card,
-.doctor-transcript-card {
+.doctor-script-card {
   padding: 0;
   overflow: hidden;
 }
@@ -1275,13 +1365,11 @@ svg {
   padding: 22px 22px 0;
 }
 
-.doctor-script-head h3,
-.doctor-transcript-card h3 {
+.doctor-script-head h3 {
   margin-top: 6px;
 }
 
-.doctor-script-scroll,
-.doctor-transcript-scroll {
+.doctor-script-scroll {
   max-height: 360px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1294,20 +1382,11 @@ svg {
   padding: 16px 22px 18px;
 }
 
-.doctor-transcript-scroll {
-  display: grid;
-  gap: 14px;
-  max-height: 220px;
-  padding: 16px 22px 22px;
-}
-
-.doctor-script-scroll::-webkit-scrollbar,
-.doctor-transcript-scroll::-webkit-scrollbar {
+.doctor-script-scroll::-webkit-scrollbar {
   width: 8px;
 }
 
-.doctor-script-scroll::-webkit-scrollbar-thumb,
-.doctor-transcript-scroll::-webkit-scrollbar-thumb {
+.doctor-script-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(154, 197, 255, 0.22);
 }
@@ -1326,8 +1405,7 @@ svg {
   gap: 10px;
 }
 
-.doctor-script-segments .callout p,
-.doctor-transcript-scroll p {
+.doctor-script-segments .callout p {
   margin-bottom: 0;
   white-space: pre-wrap;
 }
@@ -1337,22 +1415,6 @@ svg {
   margin-top: 8px;
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.doctor-transcript-card {
-  padding-top: 22px;
-}
-
-.doctor-transcript-card > .label,
-.doctor-transcript-card > h3 {
-  margin-left: 22px;
-  margin-right: 22px;
-}
-
-.doctor-transcript-scroll strong {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--text-strong);
 }
 
 .two-column-layout,
@@ -2236,6 +2298,18 @@ html[data-theme="light"] .history-filter:focus-visible {
   .director-control-field {
     min-height: auto;
   }
+
+  .doctor-workbench-grid {
+    grid-template-areas:
+      "input"
+      "output"
+      "evidence"
+      "followup";
+  }
+
+  .doctor-evidence-scroll {
+    max-height: 430px;
+  }
 }
 
 @media (max-width: 920px) {
@@ -2299,6 +2373,20 @@ html[data-theme="light"] .history-filter:focus-visible {
   .overlay-welcome-grid,
   .onboarding-question-grid {
     grid-template-columns: 1fr;
+  }
+
+  .doctor-evidence-head {
+    flex-direction: column;
+  }
+
+  .doctor-evidence-tabs {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .doctor-transcript-line {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 
