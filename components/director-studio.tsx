@@ -412,6 +412,8 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
   const stats = modePreset(mode, goal, outputSpec);
   const sessionAnswers = session?.answers ?? answers;
   const output = session?.output ?? {};
+  const savedAssistantMessage =
+    typeof output.assistantMessage === "string" ? output.assistantMessage.trim() : "";
   const slots = normalizeSlots(session?.draft?.directorSlots);
   const suggestions = session?.draft?.suggestions ?? [];
   const nextSlot = session?.draft?.nextSlot ?? null;
@@ -445,6 +447,10 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     const items: ThreadMessage[] = [];
     const questions = session?.askedQuestions.length ? session.askedQuestions : [];
 
+    if (savedAssistantMessage && !questions.includes(savedAssistantMessage)) {
+      items.push({ role: "assistant", text: savedAssistantMessage });
+    }
+
     questions.forEach((question, index) => {
       if (index === 0 || sessionAnswers[index - 1]) {
         items.push({ role: "assistant", text: question });
@@ -460,7 +466,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     });
 
     return [...items, ...sideMessages];
-  }, [revisionRequests, session?.askedQuestions, sessionAnswers, sideMessages, started]);
+  }, [revisionRequests, savedAssistantMessage, session?.askedQuestions, sessionAnswers, sideMessages, started]);
 
   const draftNote = !started
     ? `先写下这条${mode === "graphic" ? "笔记" : "视频"}的素材。`

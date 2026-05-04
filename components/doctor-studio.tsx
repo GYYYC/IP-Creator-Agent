@@ -7,6 +7,7 @@ type ContentMode = "graphic" | "video";
 type ScriptTab = "original" | "rewritten";
 
 type DoctorOutput = {
+  assistantMessage?: string;
   mainIssue?: string;
   evidence?: string;
   timeline?: Array<{ label: string; title: string; description: string }>;
@@ -1141,7 +1142,11 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [message, setMessage] = useState("");
   const [scriptTab, setScriptTab] = useState<ScriptTab>("rewritten");
   const config = MODE_CONFIG[mode];
-  const output = hasDoctorOutput(session?.output) ? session!.output : fallbackOutput;
+  const sessionOutput = session?.output;
+  const output =
+    hasDoctorOutput(sessionOutput) || sessionOutput?.assistantMessage
+      ? sessionOutput!
+      : fallbackOutput;
   const scriptBody = getScriptBody(output);
   const transcripts = getSessionTranscripts(session);
   const timelineItems = output.timeline ?? [];
@@ -1642,10 +1647,17 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
             <div className="doctor-result-scroll">
               <span className="label">本次结论</span>
               <h3>这次先改这几件事</h3>
-              <div className="callout warning">
-                <strong>主要问题</strong>
-                <p>{output.mainIssue}</p>
-              </div>
+              {output.mainIssue ? (
+                <div className="callout warning">
+                  <strong>主要问题</strong>
+                  <p>{output.mainIssue}</p>
+                </div>
+              ) : output.assistantMessage ? (
+                <div className="callout warning">
+                  <strong>AI 判断</strong>
+                  <p>{output.assistantMessage}</p>
+                </div>
+              ) : null}
               {output.evidence ? (
                 <div className="callout">
                   <strong>判断依据</strong>
