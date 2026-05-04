@@ -36,13 +36,21 @@ export async function uploadPrivateTosObject(params: TosUploadInput): Promise<To
   const body = Buffer.from(await params.file.arrayBuffer());
   const client = getTosClient();
 
-  await client.putObject({
-    bucket,
-    key,
-    body,
-    contentLength: body.byteLength,
-    contentType
-  });
+  console.info(
+    `[TOS] uploading private object: bucket=${bucket} key=${key} bytes=${body.byteLength} type=${contentType} endpoint=${normalizeTosEndpoint(getRequiredEnv("TOS_ENDPOINT"))} region=${getRequiredEnv("TOS_REGION")}`
+  );
+
+  try {
+    await client.putObject({
+      bucket,
+      key,
+      body,
+      contentLength: body.byteLength,
+      contentType
+    });
+  } catch (error) {
+    throw new Error(`TOS putObject failed: ${describeTosError(error)}`);
+  }
 
   const signedUrl = client.getPreSignedUrl({
     bucket,
@@ -68,13 +76,21 @@ export async function uploadPrivateTosObject(params: TosUploadInput): Promise<To
 }
 
 export async function verifyPrivateTosSourceUrl(source: TosUploadResult) {
-  const response = await fetchWithTimeout(source.signedUrl, {
-    method: "GET",
-    headers: {
-      Range: "bytes=0-31"
-    },
-    cache: "no-store"
-  });
+  let response: Response;
+
+  try {
+    response = await fetchWithTimeout(source.signedUrl, {
+      method: "GET",
+      headers: {
+        Range: "bytes=0-31"
+      },
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new Error(
+      `TOS signed URL self-check request failed: key=${source.key} host=${source.host} ${describeTosError(error)}`
+    );
+  }
   const contentType = response.headers.get("content-type") || "unknown";
   const contentLength = response.headers.get("content-length") || "unknown";
 
@@ -104,6 +120,7 @@ function getTosClient() {
       bucket: getRequiredEnv("TOS_BUCKET"),
       region: getRequiredEnv("TOS_REGION"),
       endpoint: normalizeTosEndpoint(getRequiredEnv("TOS_ENDPOINT")),
+      forcePathStyle: process.env.TOS_FORCE_PATH_STYLE === "true",
       requestTimeout: Number(process.env.TOS_REQUEST_TIMEOUT_MS || 120000),
       connectionTimeout: Number(process.env.TOS_CONNECTION_TIMEOUT_MS || 10000)
     });
@@ -131,6 +148,40 @@ function safeUrlHost(value: string) {
   } catch {
     return "invalid-url";
   }
+}
+
+function describeTosError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return String(error || "unknown error");
+  }
+
+  const record = error as Record<string, unknown>;
+  const parts = [
+    ["name", record.name],
+    ["message", record.message],
+    ["code", record.code],
+    ["statusCode", record.statusCode],
+    ["requestId", record.requestId],
+    ["hostId", record.hostId],
+    ["serverCode", record.serverCode],
+    ["serverMessage", record.serverMessage]
+  ]
+    .filter(([, value]) => typeof value === "string" || typeof value === "number")
+    .map(([key, value]) => `${key}=${String(value)}`);
+
+  const response = record.response;
+
+  if (response && typeof response === "object") {
+    const responseRecord = response as Record<string, unknown>;
+    if (typeof responseRecord.status === "number") {
+      parts.push(`responseStatus=${responseRecord.status}`);
+    }
+    if (typeof responseRecord.statusText === "string") {
+      parts.push(`responseStatusText=${responseRecord.statusText}`);
+    }
+  }
+
+  return parts.length ? parts.join(" ") : JSON.stringify(record);
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit) {
