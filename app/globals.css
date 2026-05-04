@@ -1175,8 +1175,7 @@ svg {
   grid-template-columns: minmax(340px, 0.92fr) minmax(460px, 1.08fr);
   grid-template-areas:
     "input output"
-    "evidence output"
-    "evidence followup";
+    "evidence output";
   align-items: start;
 }
 
@@ -1309,7 +1308,6 @@ svg {
 }
 
 .doctor-followup-card {
-  grid-area: followup;
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -2326,8 +2324,7 @@ html[data-theme="light"] .history-filter:focus-visible {
     grid-template-areas:
       "input"
       "output"
-      "evidence"
-      "followup";
+      "evidence";
   }
 
   .doctor-evidence-scroll {
