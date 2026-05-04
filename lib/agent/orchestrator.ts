@@ -9,6 +9,7 @@ import { getStore, upsertSession } from "@/lib/agent/store";
 import { AgentRunResult, AgentSession, ArtifactRecord, CreatorProfile } from "@/lib/agent/types";
 
 const DOCTOR_VISUAL_INPUT_LIMIT = Number(process.env.DOCTOR_VISUAL_INPUT_LIMIT || 6);
+const ASSISTANT_VISUAL_INPUT_LIMIT = Number(process.env.ASSISTANT_VISUAL_INPUT_LIMIT || 8);
 
 export async function runAgentSession(
   session: AgentSession,
@@ -17,10 +18,9 @@ export async function runAgentSession(
   const brain = await loadBrain(profile);
   const store = await getStore();
   const artifacts = store.artifacts.filter((artifact) => session.artifactIds.includes(artifact.id));
-  const promptArtifacts =
-    session.module === "doctor" ? artifacts.map(stripVisualDataFromArtifact) : artifacts;
+  const visualInputs = buildModuleVisualInputs(session.module, artifacts);
+  const promptArtifacts = visualInputs.length ? artifacts.map(stripVisualDataFromArtifact) : artifacts;
   const fallback = buildFallbackRun(session, profile);
-  const visualInputs = session.module === "doctor" ? buildVisualInputs(artifacts) : [];
 
   const rawResult = await callJsonModel({
     system: `${getModuleSystemPrompt(session.module)}
@@ -54,6 +54,18 @@ ${resultSchemaForModule(session.module)}`,
   return upsertSession(nextSession);
 }
 
+function buildModuleVisualInputs(module: AgentSession["module"], artifacts: ArtifactRecord[]) {
+  if (module === "doctor") {
+    return buildVisualInputs(artifacts, DOCTOR_VISUAL_INPUT_LIMIT);
+  }
+
+  if (module === "assistant") {
+    return buildVisualInputs(artifacts, ASSISTANT_VISUAL_INPUT_LIMIT);
+  }
+
+  return [];
+}
+
 function stripVisualDataFromArtifact(artifact: ArtifactRecord): ArtifactRecord {
   if (!artifact.extractedJson?.visualDataUrl) {
     return artifact;
@@ -67,7 +79,7 @@ function stripVisualDataFromArtifact(artifact: ArtifactRecord): ArtifactRecord {
   };
 }
 
-function buildVisualInputs(artifacts: ArtifactRecord[]) {
+function buildVisualInputs(artifacts: ArtifactRecord[], limit: number) {
   return artifacts
     .map((artifact) => {
       const dataUrl =
@@ -108,7 +120,7 @@ function buildVisualInputs(artifacts: ArtifactRecord[]) {
       };
     })
     .filter((item): item is { dataUrl: string; label: string } => Boolean(item))
-    .slice(0, DOCTOR_VISUAL_INPUT_LIMIT);
+    .slice(0, limit);
 }
 
 function resultSchemaForModule(module: AgentSession["module"]) {

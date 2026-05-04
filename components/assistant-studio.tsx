@@ -63,6 +63,9 @@ type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+const COMMENT_SCREENSHOT_MAX_SIDE = 1280;
+const COMMENT_SCREENSHOT_JPEG_QUALITY = 0.78;
+
 async function postJson<T>(url: string, body?: Record<string, unknown>) {
   const response = await fetch(url, {
     method: "POST",
@@ -225,6 +228,42 @@ function firstReplyText(value: unknown[] | undefined) {
   return "";
 }
 
+async function imageFileToDataUrl(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+  const image = new Image();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("图片读取失败。"));
+      image.src = objectUrl;
+    });
+
+    const scale = Math.min(
+      1,
+      COMMENT_SCREENSHOT_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight)
+    );
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("图片处理失败。");
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+
+    return canvas.toDataURL("image/jpeg", COMMENT_SCREENSHOT_JPEG_QUALITY);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function normalizeTaskMode(value: unknown): AssistantTaskMode {
   return value === "comment_direction" ? "comment_direction" : "single_comment";
 }
@@ -350,9 +389,25 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   }, [initialSessionId]);
 
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
-    setCommentFiles(Array.from(event.target.files ?? []));
+    const nextFiles = Array.from(event.target.files ?? []);
+
+    setCommentFiles((current) => {
+      const seen = new Set(current.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+      const merged = [...current];
+
+      for (const file of nextFiles) {
+        const key = `${file.name}-${file.size}-${file.lastModified}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(file);
+        }
+      }
+
+      return merged;
+    });
     setSession(null);
     setMessage("");
+    event.target.value = "";
   }
 
   function switchMode(nextMode: ContentMode) {
@@ -403,14 +458,21 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
     setMessage("");
     try {
       const artifacts = await Promise.all(
-        commentFiles.map((file) =>
-          postJson<ArtifactResponse>("/api/artifacts/register", {
+        commentFiles.map(async (file) => {
+          const visualDataUrl = await imageFileToDataUrl(file);
+
+          return postJson<ArtifactResponse>("/api/artifacts/register", {
             kind: "comment_screenshot",
             mimeType: file.type,
             fileName: file.name,
-            sizeBytes: file.size
-          })
-        )
+            sizeBytes: file.size,
+            extractedJson: {
+              visualDataUrl,
+              visualRole: "comment_screenshot",
+              sourceFileName: file.name
+            }
+          });
+        })
       );
       const created = await postJson<{ session: ApiSession }>("/api/sessions", {
         module: "assistant",
@@ -549,6 +611,19 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
                 <span key={name}>{name}</span>
               ))}
             </div>
+            {commentFiles.length ? (
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  setCommentFiles([]);
+                  setSession(null);
+                  setMessage("");
+                }}
+                type="button"
+              >
+                清空截图
+              </button>
+            ) : null}
             <div className="input-group">
               <label htmlFor="assistant-comments">{taskConfig.materialLabel}</label>
               <textarea

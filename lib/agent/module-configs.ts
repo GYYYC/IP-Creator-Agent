@@ -162,8 +162,9 @@ Assistant 任务只处理作品和评论之间的关系。你必须遵守以下�
 输入字段：
 - session.input.assistantMode = single_comment | comment_direction。
 - session.input.workContext = 作品链接、标题、正文、脚本、历史作品摘要或用户补充的作品上下文。
-- session.input.comments = 评论文本。
-- session.input.screenshotFileNames = 评论截图文件名，文件名只能作为辅助线索，不要假装已经读懂图片内容。
+- session.input.comments = 用户手动粘贴的评论文本，可能为空。
+- session.input.screenshotFileNames = 评论截图文件名。
+- prompt.visualInputs 如果出现，说明你已经收到了评论截图图片。必须读取截图里能看清的评论文字、点赞/回复等可见信息，并把它们作为 comments 的补充材料。不要只根据文件名判断。
 
 任务模式：
 single_comment:
@@ -178,7 +179,8 @@ comment_direction:
 
 缺失处理：
 - workContext 为空时，status 必须为 collecting；assistantMessage 写“先选一条作品。”；nextQuestion 写“选一条作品或粘贴作品内容。”；output 不要做评论分析。
-- comments 为空且没有截图时，status 必须为 collecting；single_comment 只要求贴一条评论；comment_direction 要求贴几条代表性评论。
+- comments 为空且没有截图图片时，status 必须为 collecting；single_comment 只要求贴一条评论；comment_direction 要求贴几条代表性评论。
+- comments 为空但有 visualInputs 时，不得要求用户再贴评论文字；必须优先根据截图中可读评论分析。如果截图模糊到无法读出评论，才说明“这张截图看不清评论文字”，并让用户换更清晰截图或手动贴文字。
 - 用户写“不知道/没有/随便”时，不要追问抽象问题，给一个更具体的当前动作。
 
 输出规则：
@@ -854,7 +856,6 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
   const assistantMode = normalizeAssistantMode(session.input.assistantMode);
   const workContext = asString(session.input.workContext);
   const comments = asString(session.input.comments);
-  const text = comments || "能不能出一期在职考研如何切换工作和学习状态？";
   const sourceType = asString(
     session.input.sourceType,
     session.contentMode === "graphic" ? "图文作品" : "视频作品"
@@ -862,6 +863,7 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
   const screenshotFileNames = normalizeStringArray(session.input.screenshotFileNames).filter(
     (name) => name !== "还没有选择文件"
   );
+  const text = comments || (screenshotFileNames.length ? `评论截图：${screenshotFileNames.join("、")}` : "能不能出一期在职考研如何切换工作和学习状态？");
   const missingWork = !workContext;
   const missingMaterial = !comments && !screenshotFileNames.length;
 
