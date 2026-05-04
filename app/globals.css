@@ -1308,6 +1308,33 @@ svg {
   white-space: nowrap;
 }
 
+.doctor-rewrite-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.doctor-rewrite-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-strong);
+  font: inherit;
+  line-height: 1.78;
+}
+
+.doctor-rewrite-empty {
+  display: grid;
+  gap: 10px;
+}
+
+.doctor-rewrite-empty p {
+  margin: 0;
+}
+
+.doctor-evidence-actions {
+  padding: 0;
+}
+
 .doctor-followup-card {
   grid-area: followup;
   display: grid;
