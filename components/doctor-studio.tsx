@@ -4,7 +4,8 @@ import { createMultipartUploader, upload } from "@vercel/blob/client";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type ContentMode = "graphic" | "video";
-type EvidenceTab = "original" | "rewritten" | "timeline";
+type EvidenceTab = "transcript" | "timeline";
+type ScriptTab = "original" | "rewritten";
 
 type DoctorOutput = {
   mainIssue?: string;
@@ -1139,31 +1140,29 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>("original");
+  const [evidenceTab, setEvidenceTab] = useState<EvidenceTab>("transcript");
+  const [scriptTab, setScriptTab] = useState<ScriptTab>("rewritten");
   const config = MODE_CONFIG[mode];
   const output = hasDoctorOutput(session?.output) ? session!.output : fallbackOutput;
   const scriptBody = getScriptBody(output);
   const transcripts = getSessionTranscripts(session);
   const timelineItems = output.timeline ?? [];
   const hasTranscriptEvidence = transcripts.length > 0;
-  const hasRewriteEntry = Boolean(session?.id || scriptBody);
   const hasTimelineEvidence = timelineItems.length > 0;
-  const hasEvidence = hasTranscriptEvidence || hasRewriteEntry || hasTimelineEvidence;
-  const evidenceTabs: EvidenceTab[] = [
-    ...(hasTranscriptEvidence ? (["original"] as const) : []),
-    ...(hasRewriteEntry ? (["rewritten"] as const) : []),
-    ...(hasTimelineEvidence ? (["timeline"] as const) : [])
-  ];
-  const showEvidenceTabs = evidenceTabs.length > 1;
-  const activeEvidenceTab = evidenceTabs.includes(evidenceTab)
-    ? evidenceTab
-    : evidenceTabs[0] || "timeline";
-  const evidenceTitle =
-    activeEvidenceTab === "original"
-      ? "改前口播时间轴"
-      : activeEvidenceTab === "rewritten"
-        ? "修改后的口播稿"
-        : "掉点记录";
+  const hasEvidence = hasTranscriptEvidence || hasTimelineEvidence;
+  const showEvidenceTabs = hasTranscriptEvidence && hasTimelineEvidence;
+  const activeEvidenceTab: EvidenceTab =
+    evidenceTab === "timeline" && hasTimelineEvidence
+      ? "timeline"
+      : hasTranscriptEvidence
+        ? "transcript"
+        : "timeline";
+  const evidenceTitle = showEvidenceTabs
+    ? "口播时间轴与掉点记录"
+    : hasTranscriptEvidence
+      ? "识别到的原视频内容"
+      : "掉点记录";
+  const hasScriptWorkspace = Boolean(session?.id || scriptBody || hasTranscriptEvidence);
   const canAnalyze = stats.trim() || notes.trim() || contentFiles.length > 0 || dataFiles.length > 0;
 
   useEffect(() => {
@@ -1211,10 +1210,20 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
   }, [initialSessionId]);
 
   useEffect(() => {
-    if (activeEvidenceTab !== evidenceTab) {
-      setEvidenceTab(activeEvidenceTab);
+    if (evidenceTab === "transcript" && !hasTranscriptEvidence && hasTimelineEvidence) {
+      setEvidenceTab("timeline");
     }
-  }, [activeEvidenceTab, evidenceTab]);
+
+    if (evidenceTab === "timeline" && !hasTimelineEvidence && hasTranscriptEvidence) {
+      setEvidenceTab("transcript");
+    }
+  }, [evidenceTab, hasTimelineEvidence, hasTranscriptEvidence]);
+
+  useEffect(() => {
+    if (scriptTab === "original" && !hasTranscriptEvidence && (session?.id || scriptBody)) {
+      setScriptTab("rewritten");
+    }
+  }, [hasTranscriptEvidence, scriptBody, scriptTab, session?.id]);
 
   function switchMode(nextMode: ContentMode) {
     if (nextMode === mode) {
@@ -1630,50 +1639,35 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
           <section className="surface-card glass doctor-evidence-card">
             <div className="doctor-evidence-head">
               <div>
-                <span className="label">口播稿</span>
+                <span className="label">复盘证据</span>
                 <h3>{evidenceTitle}</h3>
               </div>
               {showEvidenceTabs ? (
-                <div aria-label="口播稿" className="doctor-evidence-tabs" role="tablist">
-                  {hasTranscriptEvidence ? (
-                    <button
-                      aria-selected={activeEvidenceTab === "original"}
-                      className={`mode-chip ${activeEvidenceTab === "original" ? "active" : ""}`}
-                      onClick={() => setEvidenceTab("original")}
-                      role="tab"
-                      type="button"
-                    >
-                      改前口播
-                    </button>
-                  ) : null}
-                  {hasRewriteEntry ? (
-                    <button
-                      aria-selected={activeEvidenceTab === "rewritten"}
-                      className={`mode-chip ${activeEvidenceTab === "rewritten" ? "active" : ""}`}
-                      onClick={() => setEvidenceTab("rewritten")}
-                      role="tab"
-                      type="button"
-                    >
-                      改后口播
-                    </button>
-                  ) : null}
-                  {hasTimelineEvidence ? (
-                    <button
-                      aria-selected={activeEvidenceTab === "timeline"}
-                      className={`mode-chip ${activeEvidenceTab === "timeline" ? "active" : ""}`}
-                      onClick={() => setEvidenceTab("timeline")}
-                      role="tab"
-                      type="button"
-                    >
-                      掉点记录
-                    </button>
-                  ) : null}
+                <div aria-label="复盘证据" className="doctor-evidence-tabs" role="tablist">
+                  <button
+                    aria-selected={activeEvidenceTab === "transcript"}
+                    className={`mode-chip ${activeEvidenceTab === "transcript" ? "active" : ""}`}
+                    onClick={() => setEvidenceTab("transcript")}
+                    role="tab"
+                    type="button"
+                  >
+                    口播时间轴
+                  </button>
+                  <button
+                    aria-selected={activeEvidenceTab === "timeline"}
+                    className={`mode-chip ${activeEvidenceTab === "timeline" ? "active" : ""}`}
+                    onClick={() => setEvidenceTab("timeline")}
+                    role="tab"
+                    type="button"
+                  >
+                    掉点记录
+                  </button>
                 </div>
               ) : null}
             </div>
 
             <div className="doctor-evidence-scroll">
-              {activeEvidenceTab === "original" && hasTranscriptEvidence ? (
+              {activeEvidenceTab === "transcript" && hasTranscriptEvidence ? (
                 <div className="doctor-transcript-list">
                   {transcripts.map((transcript) => (
                     <div className="doctor-transcript-source" key={transcript.fileName}>
@@ -1691,43 +1685,6 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
                     </div>
                   ))}
                 </div>
-              ) : null}
-
-              {activeEvidenceTab === "rewritten" && hasRewriteEntry ? (
-                scriptBody ? (
-                  <div className="doctor-rewrite-panel">
-                    {output.rewrittenScript?.segments?.length ? (
-                      <div className="doctor-script-segments">
-                        {output.rewrittenScript.segments.map((segment, index) => (
-                          <div className="callout" key={`${segment.label || "segment"}-${index}`}>
-                            <strong>{segment.label || `第 ${index + 1} 段`}</strong>
-                            <p>{segment.script}</p>
-                            {segment.note ? <span>{segment.note}</span> : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    <pre className="doctor-rewrite-pre">{scriptBody}</pre>
-                    <div className="page-actions doctor-evidence-actions">
-                      <button className="button-secondary" onClick={copyScript} type="button">
-                        复制改后口播
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="callout doctor-rewrite-empty">
-                    <strong>还没有修改后的口播稿</strong>
-                    <p>先根据本次诊断结论生成一版，之后会在这里和改前口播切换对照。</p>
-                    <button
-                      className="button-secondary"
-                      disabled={!session?.id || loading}
-                      onClick={handleRewriteScript}
-                      type="button"
-                    >
-                      按结论重写脚本
-                    </button>
-                  </div>
-                )
               ) : null}
 
               {activeEvidenceTab === "timeline" && hasTimelineEvidence ? (
@@ -1793,6 +1750,107 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
               ) : null}
             </div>
           </section>
+
+          {hasScriptWorkspace ? (
+            <section className="surface-card glass doctor-script-card">
+              <div className="doctor-script-head">
+                <div>
+                  <span className="label">口播稿</span>
+                  <h3>
+                    {scriptTab === "original"
+                      ? "改前口播稿"
+                      : output.rewrittenScript?.title || "修改后的口播稿"}
+                  </h3>
+                </div>
+                {hasTranscriptEvidence || session?.id || scriptBody ? (
+                  <div aria-label="口播稿版本" className="doctor-script-tabs" role="tablist">
+                    {hasTranscriptEvidence ? (
+                      <button
+                        aria-selected={scriptTab === "original"}
+                        className={`mode-chip ${scriptTab === "original" ? "active" : ""}`}
+                        onClick={() => setScriptTab("original")}
+                        role="tab"
+                        type="button"
+                      >
+                        改前口播
+                      </button>
+                    ) : null}
+                    {session?.id || scriptBody ? (
+                      <button
+                        aria-selected={scriptTab === "rewritten"}
+                        className={`mode-chip ${scriptTab === "rewritten" ? "active" : ""}`}
+                        onClick={() => setScriptTab("rewritten")}
+                        role="tab"
+                        type="button"
+                      >
+                        改后口播
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div className="doctor-script-scroll">
+                {scriptTab === "original" && hasTranscriptEvidence ? (
+                  <div className="doctor-transcript-list doctor-script-transcript-list">
+                    {transcripts.map((transcript) => (
+                      <div className="doctor-transcript-source" key={transcript.fileName}>
+                        <strong>{transcript.fileName}</strong>
+                        {transcript.utterances?.length ? (
+                          transcript.utterances.map((utterance, index) => (
+                            <p className="doctor-transcript-line" key={`${utterance.startTimeMs}-${index}`}>
+                              <span>{formatTranscriptTimeRange(utterance)}</span>
+                              {utterance.text}
+                            </p>
+                          ))
+                        ) : (
+                          <p className="doctor-transcript-line">{transcript.text}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {scriptTab === "rewritten" ? (
+                  scriptBody ? (
+                    <>
+                      {output.rewrittenScript?.segments?.length ? (
+                        <div className="doctor-script-segments">
+                          {output.rewrittenScript.segments.map((segment, index) => (
+                            <div className="callout" key={`${segment.label || "segment"}-${index}`}>
+                              <strong>{segment.label || `第 ${index + 1} 段`}</strong>
+                              <p>{segment.script}</p>
+                              {segment.note ? <span>{segment.note}</span> : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      <pre>{scriptBody}</pre>
+                    </>
+                  ) : (
+                    <div className="callout doctor-script-empty">
+                      <strong>还没有改后口播稿</strong>
+                      <p>点击生成后，这里会放修改后的口播稿，方便和改前版本切换对照。</p>
+                      <button
+                        className="button-secondary"
+                        disabled={!session?.id || loading}
+                        onClick={handleRewriteScript}
+                        type="button"
+                      >
+                        按结论重写脚本
+                      </button>
+                    </div>
+                  )
+                ) : null}
+              </div>
+              {scriptBody && scriptTab === "rewritten" ? (
+                <div className="page-actions doctor-result-actions">
+                  <button className="button-secondary" onClick={copyScript} type="button">
+                    复制改后口播
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
         </aside>
 

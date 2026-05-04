@@ -1308,33 +1308,6 @@ svg {
   white-space: nowrap;
 }
 
-.doctor-rewrite-panel {
-  display: grid;
-  gap: 14px;
-}
-
-.doctor-rewrite-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-strong);
-  font: inherit;
-  line-height: 1.78;
-}
-
-.doctor-rewrite-empty {
-  display: grid;
-  gap: 10px;
-}
-
-.doctor-rewrite-empty p {
-  margin: 0;
-}
-
-.doctor-evidence-actions {
-  padding: 0;
-}
-
 .doctor-followup-card {
   grid-area: followup;
   display: grid;
@@ -1380,6 +1353,7 @@ svg {
 }
 
 .doctor-script-card {
+  min-height: 320px;
   padding: 0;
   overflow: hidden;
 }
@@ -1396,8 +1370,21 @@ svg {
   margin-top: 6px;
 }
 
+.doctor-script-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.doctor-script-tabs .mode-chip {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
 .doctor-script-scroll {
-  max-height: 360px;
+  max-height: 420px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -1425,6 +1412,15 @@ svg {
   color: var(--text-strong);
   font: inherit;
   line-height: 1.78;
+}
+
+.doctor-script-empty {
+  display: grid;
+  gap: 10px;
+}
+
+.doctor-script-empty p {
+  margin: 0;
 }
 
 .doctor-script-segments {
@@ -2407,6 +2403,15 @@ html[data-theme="light"] .history-filter:focus-visible {
   }
 
   .doctor-evidence-tabs {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .doctor-script-head {
+    flex-direction: column;
+  }
+
+  .doctor-script-tabs {
     justify-content: flex-start;
     width: 100%;
   }
