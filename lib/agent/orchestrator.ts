@@ -13,11 +13,13 @@ const ASSISTANT_VISUAL_INPUT_LIMIT = Number(process.env.ASSISTANT_VISUAL_INPUT_L
 
 export async function runAgentSession(
   session: AgentSession,
-  profile: CreatorProfile
+  profile: CreatorProfile,
+  sessionArtifacts?: ArtifactRecord[]
 ): Promise<AgentSession> {
   const brain = await loadBrain(profile);
-  const store = await getStore();
-  const artifacts = store.artifacts.filter((artifact) => session.artifactIds.includes(artifact.id));
+  const artifacts =
+    sessionArtifacts ??
+    (await getStore()).artifacts.filter((artifact) => session.artifactIds.includes(artifact.id));
   const visualInputs = buildModuleVisualInputs(session.module, artifacts);
   const promptArtifacts = visualInputs.length ? artifacts.map(stripVisualDataFromArtifact) : artifacts;
   const fallback = buildFallbackRun(session, profile);

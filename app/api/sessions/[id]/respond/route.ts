@@ -1,6 +1,6 @@
 import { jsonError, jsonOk, readJson } from "@/lib/agent/http";
 import { getOrCreateProfile } from "@/lib/agent/identity";
-import { getStore, upsertSession } from "@/lib/agent/store";
+import { getSessionById, upsertSession } from "@/lib/agent/store";
 
 export const runtime = "nodejs";
 
@@ -17,8 +17,7 @@ export async function POST(
     return jsonError("Answer is required.");
   }
 
-  const store = await getStore();
-  const session = store.sessions.find((item) => item.id === id);
+  const session = await getSessionById(id);
 
   if (!session) {
     return jsonError("Session not found.", 404);

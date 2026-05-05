@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/agent/http";
 import { getOrCreateProfile } from "@/lib/agent/identity";
 import { runAgentSession } from "@/lib/agent/orchestrator";
-import { getStore } from "@/lib/agent/store";
+import { getProfileById, getSessionBundle, pruneSessionArtifactVisualData } from "@/lib/agent/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -12,15 +12,15 @@ export async function POST(
 ) {
   const currentProfile = await getOrCreateProfile();
   const { id } = await context.params;
-  const store = await getStore();
-  const session = store.sessions.find((item) => item.id === id);
+  const bundle = await getSessionBundle(id, { includeVisualData: true });
 
-  if (!session) {
+  if (!bundle) {
     return jsonError("Session not found.", 404);
   }
 
-  const profile = store.profiles.find((item) => item.id === session.profileId) ?? currentProfile;
-  const nextSession = await runAgentSession(session, profile);
+  const profile = (await getProfileById(bundle.session.profileId)) ?? currentProfile;
+  const nextSession = await runAgentSession(bundle.session, profile, bundle.artifacts);
+  await pruneSessionArtifactVisualData(nextSession);
 
   return jsonOk({ session: nextSession });
 }

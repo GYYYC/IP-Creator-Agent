@@ -1,6 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/agent/http";
 import { getOrCreateProfile } from "@/lib/agent/identity";
-import { getStore } from "@/lib/agent/store";
+import { getSessionBundle } from "@/lib/agent/store";
 
 export const runtime = "nodejs";
 
@@ -10,16 +10,11 @@ export async function GET(
 ) {
   await getOrCreateProfile();
   const { id } = await context.params;
-  const store = await getStore();
-  const session = store.sessions.find((item) => item.id === id);
+  const bundle = await getSessionBundle(id);
 
-  if (!session) {
+  if (!bundle) {
     return jsonError("Session not found.", 404);
   }
 
-  const artifacts = store.artifacts.filter((artifact) =>
-    session.artifactIds.includes(artifact.id)
-  );
-
-  return jsonOk({ session, artifacts });
+  return jsonOk(bundle);
 }

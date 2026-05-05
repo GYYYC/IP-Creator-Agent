@@ -30,6 +30,7 @@ const databaseUrl =
   process.env.POSTGRES_URL_NON_POOLING ||
   "";
 const poolConnectionString = normalizeDatabaseUrlForPg(databaseUrl);
+const STRIPPED_ARTIFACT_JSON_SQL = "data #- '{extractedJson,visualDataUrl}'";
 
 let writeQueue: Promise<void> = Promise.resolve();
 let pool: Pool | null = null;
@@ -168,7 +169,7 @@ async function readDatabaseStore(): Promise<AgentStoreShape> {
       "select data from agent_sessions order by updated_at desc"
     );
     const artifacts = await client.query<{ data: ArtifactRecord }>(
-      "select data from agent_artifacts order by created_at desc"
+      `select ${STRIPPED_ARTIFACT_JSON_SQL} as data from agent_artifacts order by created_at desc`
     );
 
     return {
@@ -180,6 +181,129 @@ async function readDatabaseStore(): Promise<AgentStoreShape> {
   } finally {
     client.release();
   }
+}
+
+function stripArtifactVisualData(artifact: ArtifactRecord): ArtifactRecord {
+  if (!artifact.extractedJson || typeof artifact.extractedJson.visualDataUrl !== "string") {
+    return artifact;
+  }
+
+  const { visualDataUrl: _visualDataUrl, ...extractedJson } = artifact.extractedJson;
+
+  return {
+    ...artifact,
+    extractedJson
+  };
+}
+
+export async function getProfileById(profileId: string) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: CreatorProfile }>(
+      "select data from agent_profiles where id = $1 limit 1",
+      [profileId]
+    );
+
+    return result.rows[0]?.data ?? null;
+  }
+
+  const store = await readStore();
+  return store.profiles.find((profile) => profile.id === profileId) ?? null;
+}
+
+export async function getSessionById(sessionId: string) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: AgentSession }>(
+      "select data from agent_sessions where id = $1 limit 1",
+      [sessionId]
+    );
+
+    return result.rows[0]?.data ?? null;
+  }
+
+  const store = await readStore();
+  return store.sessions.find((session) => session.id === sessionId) ?? null;
+}
+
+export async function getSessionBundle(
+  sessionId: string,
+  options: { includeVisualData?: boolean } = {}
+) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const client = await getPool().connect();
+
+    try {
+      const sessionResult = await client.query<{ data: AgentSession }>(
+        "select data from agent_sessions where id = $1 limit 1",
+        [sessionId]
+      );
+      const session = sessionResult.rows[0]?.data ?? null;
+
+      if (!session) {
+        return null;
+      }
+
+      const artifactIds = session.artifactIds ?? [];
+      const dataExpression = options.includeVisualData ? "data" : STRIPPED_ARTIFACT_JSON_SQL;
+      const artifactResult = await client.query<{ data: ArtifactRecord }>(
+        `select ${dataExpression} as data
+         from agent_artifacts
+         where profile_id = $1
+         and (session_id = $2 or id = any($3::text[]))
+         order by created_at asc`,
+        [session.profileId, session.id, artifactIds]
+      );
+      const artifacts = artifactResult.rows.map((row) =>
+        options.includeVisualData ? row.data : stripArtifactVisualData(row.data)
+      );
+
+      return { session, artifacts };
+    } finally {
+      client.release();
+    }
+  }
+
+  const store = await readStore();
+  const session = store.sessions.find((item) => item.id === sessionId) ?? null;
+
+  if (!session) {
+    return null;
+  }
+
+  const artifacts = store.artifacts
+    .filter((artifact) => session.artifactIds.includes(artifact.id) || artifact.sessionId === session.id)
+    .map((artifact) => options.includeVisualData ? artifact : stripArtifactVisualData(artifact));
+
+  return { session, artifacts };
+}
+
+export async function pruneSessionArtifactVisualData(session: AgentSession) {
+  const artifactIds = session.artifactIds ?? [];
+
+  if (useDatabase()) {
+    await ensureDatabase();
+    await getPool().query(
+      `update agent_artifacts
+       set data = data #- '{extractedJson,visualDataUrl}'
+       where profile_id = $1
+       and (session_id = $2 or id = any($3::text[]))
+       and data #>> '{extractedJson,visualDataUrl}' is not null`,
+      [session.profileId, session.id, artifactIds]
+    );
+
+    return;
+  }
+
+  await mutateStore((store) => {
+    store.artifacts = store.artifacts.map((artifact) =>
+      artifact.profileId === session.profileId &&
+      (artifact.sessionId === session.id || artifactIds.includes(artifact.id))
+        ? stripArtifactVisualData(artifact)
+        : artifact
+    );
+  });
 }
 
 async function upsertDatabaseProfile(profile: CreatorProfile) {
