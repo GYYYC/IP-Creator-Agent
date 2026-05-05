@@ -510,6 +510,9 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   function handleRecentWorkChange(value: string) {
     if (!value) {
       setSelectedWorkId("");
+      setWorkContext("");
+      setSession(null);
+      setMessage("");
       return;
     }
 
@@ -620,34 +623,25 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
             </div>
             <div className="input-group">
               <div className="assistant-field-head">
-                <label htmlFor="assistant-work">作品内容、链接或脚本</label>
-                {workOptions.length ? (
-                  <select
-                    aria-label="使用最近复盘作品"
-                    className="recent-work-select"
-                    onChange={(event) => handleRecentWorkChange(event.target.value)}
-                    value={selectedWorkId}
-                  >
-                    <option value="">使用最近复盘作品</option>
-                    {workOptions.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.title}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
+                <label htmlFor="assistant-work-select">作品来源</label>
+                <select
+                  id="assistant-work-select"
+                  aria-label="使用最近复盘作品"
+                  className="recent-work-select"
+                  disabled={!workOptions.length}
+                  onChange={(event) => handleRecentWorkChange(event.target.value)}
+                  value={selectedWorkId}
+                >
+                  <option value="">
+                    {workOptions.length ? "使用最近复盘作品" : "暂无复盘作品"}
+                  </option>
+                  {workOptions.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <textarea
-                id="assistant-work"
-                onChange={(event) => {
-                  setWorkContext(event.target.value);
-                  setSelectedWorkId("");
-                  setSession(null);
-                }}
-                placeholder={contentConfig.workPlaceholder}
-                rows={5}
-                value={workContext}
-              />
             </div>
             <label className="upload-card profile-upload-card">
               <strong>{contentConfig.workUploadLabel}</strong>
