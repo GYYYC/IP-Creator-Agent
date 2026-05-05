@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { fetchJson, postJson } from "@/lib/client-api";
 
 type ContentMode = "graphic" | "video";
 type AssistantTaskMode = "single_comment" | "comment_direction";
@@ -59,38 +60,8 @@ type ArtifactResponse = {
   };
 };
 
-type ApiResponse<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
-
 const COMMENT_SCREENSHOT_MAX_SIDE = 1280;
 const COMMENT_SCREENSHOT_JPEG_QUALITY = 0.78;
-
-async function postJson<T>(url: string, body?: Record<string, unknown>) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
-
-async function fetchJson<T>(url: string) {
-  const response = await fetch(url);
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
 
 const CONTENT_MODE_CONFIG: Record<
   ContentMode,

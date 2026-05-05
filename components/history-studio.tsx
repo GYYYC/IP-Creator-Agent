@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { HistoryEntry } from "@/lib/agent/history-data";
+import { postJson } from "@/lib/client-api";
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -19,22 +20,8 @@ function formatDate(value: string) {
 }
 
 async function deleteHistoryEntries(sessionIds: string[]) {
-  const response = await fetch("/api/history/delete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionIds })
-  });
-  const payload = (await response.json()) as {
-    ok: boolean;
-    data?: { deletedIds: string[] };
-    error?: string;
-  };
-
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || "删除失败，请稍后再试。");
-  }
-
-  return payload.data?.deletedIds ?? [];
+  const payload = await postJson<{ deletedIds: string[] }>("/api/history/delete", { sessionIds });
+  return payload.deletedIds ?? [];
 }
 
 function visibleArtifacts(artifacts: HistoryEntry["artifacts"]) {

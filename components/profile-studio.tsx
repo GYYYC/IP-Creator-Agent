@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { fetchJson, patchJson, postJson } from "@/lib/client-api";
 import { profileAssetInsights } from "@/lib/demo-data";
 
 type AssetMode = "graphic" | "video";
@@ -10,10 +11,6 @@ type ProfileForm = {
   audience: string;
   tone: string;
 };
-type ApiResponse<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
-
 type ProfilePayload = {
   profile: {
     identity?: Record<string, unknown>;
@@ -75,47 +72,6 @@ const DEFAULT_PROFILE_FORM: ProfileForm = {
   audience: "正在被一个具体问题困住、需要可靠方法和行动顺序的人。",
   tone: "有方法、稳、愿意把判断边界讲清楚，但不会高高在上。"
 };
-
-async function postJson<T>(url: string, body?: Record<string, unknown>) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
-
-async function patchJson<T>(url: string, body?: Record<string, unknown>) {
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
-
-async function fetchJson<T>(url: string) {
-  const response = await fetch(url);
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
 
 function profileFormFromPayload(payload: ProfilePayload): ProfileForm {
   const identity = payload.profile.identity ?? {};

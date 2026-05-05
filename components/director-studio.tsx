@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { fetchJson, postJson } from "@/lib/client-api";
 
 type Mode = "graphic" | "video";
 type Goal = "connect" | "teach" | "save" | "follow";
@@ -64,16 +65,6 @@ type ArtifactResponse = {
     id: string;
   };
 };
-
-type ApiResponse<T> =
-  | {
-      ok: true;
-      data: T;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
 
 const MODE_CONFIG: Record<
   Mode,
@@ -254,34 +245,6 @@ function buildDraft(mode: Mode, goal: Goal, tone: Tone, idea: string, answers: s
       "今天不讲大道理，只讲一个能立刻开始的小动作。"
     ]
   };
-}
-
-async function postJson<T>(url: string, body?: Record<string, unknown>) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
-}
-
-async function fetchJson<T>(url: string) {
-  const response = await fetch(url);
-  const payload = (await response.json()) as ApiResponse<T>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
-
-  return payload.data;
 }
 
 function asString(value: unknown, fallback = "") {

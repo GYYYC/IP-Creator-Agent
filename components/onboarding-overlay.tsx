@@ -1,45 +1,25 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { postJson, patchJson } from "@/lib/client-api";
 import { onboardingFlow } from "@/lib/demo-data";
 
 const STORAGE_KEY = "ip-creator-onboarding-dismissed";
 const EMPTY_VALUES = Object.fromEntries(
   onboardingFlow.flatMap((step) => step.fields.map((field) => [field.key, ""]))
 );
-type ApiResponse<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
 
 async function patchProfile(body: Record<string, unknown>) {
-  const response = await fetch("/api/profile", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const payload = (await response.json()) as ApiResponse<unknown>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
+  await patchJson<unknown>("/api/profile", body);
 }
 
 async function registerHistoryWork(file: File) {
-  const response = await fetch("/api/artifacts/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      kind: "history_work",
-      mimeType: file.type || "application/octet-stream",
-      fileName: file.name,
-      sizeBytes: file.size
-    })
+  await postJson<unknown>("/api/artifacts/register", {
+    kind: "history_work",
+    mimeType: file.type || "application/octet-stream",
+    fileName: file.name,
+    sizeBytes: file.size
   });
-  const payload = (await response.json()) as ApiResponse<unknown>;
-
-  if (!payload.ok) {
-    throw new Error(payload.error);
-  }
 }
 
 function fileNames(files: File[]) {

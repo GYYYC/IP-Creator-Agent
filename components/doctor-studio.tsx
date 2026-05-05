@@ -176,6 +176,13 @@ async function postFormData<T>(url: string, body: FormData) {
 async function readApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
   const text = await response.text();
 
+  if (!text.trim()) {
+    return {
+      ok: false,
+      error: `接口返回了空响应（HTTP ${response.status}）。请查看 Vercel 对应请求日志。`
+    };
+  }
+
   try {
     const payload = JSON.parse(text) as ApiResponse<T>;
 
@@ -219,10 +226,23 @@ async function retrieveBlobClientToken(params: {
       }
     })
   });
-  const payload = (await response.json()) as BlobClientTokenResponse | { ok: false; error: string };
+  const text = await response.text();
+  let payload: BlobClientTokenResponse | { ok: false; error: string } | null = null;
 
-  if (!response.ok || !("clientToken" in payload)) {
-    throw new Error("没有拿到 Blob 上传授权。");
+  if (text.trim()) {
+    try {
+      payload = JSON.parse(text) as BlobClientTokenResponse | { ok: false; error: string };
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok || !payload || !("clientToken" in payload)) {
+    const message =
+      payload && "error" in payload
+        ? payload.error
+        : `没有拿到 Blob 上传授权（HTTP ${response.status}）。`;
+    throw new Error(message);
   }
 
   return payload.clientToken;

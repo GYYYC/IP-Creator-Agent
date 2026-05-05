@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { fetchJson } from "@/lib/client-api";
 import { creatorMemory } from "@/lib/demo-data";
 
 type BrainSnapshot = {
@@ -10,10 +11,6 @@ type BrainSnapshot = {
   tags: string[];
   notes: Array<{ title: string; body: string }>;
 };
-
-type BootstrapResponse =
-  | { ok: true; data: { brain: BrainSnapshot } }
-  | { ok: false; error: string };
 
 export function MemoryWidget() {
   const [collapsed, setCollapsed] = useState(true);
@@ -29,10 +26,9 @@ export function MemoryWidget() {
 
     async function loadBrain() {
       try {
-        const response = await fetch("/api/bootstrap");
-        const payload = (await response.json()) as BootstrapResponse;
-        if (active && payload.ok) {
-          setBrain(payload.data.brain);
+        const payload = await fetchJson<{ brain: BrainSnapshot }>("/api/bootstrap");
+        if (active) {
+          setBrain(payload.brain);
         }
       } catch {
         // Keep demo memory visible when the API is unavailable.
