@@ -28,6 +28,13 @@ export type DashboardData = {
     href: string;
   }>;
   nextStep: DashboardTask;
+  profileSnapshot: {
+    title: string;
+    subtitle: string;
+    tags: string[];
+    highlightTitle: string;
+    highlightBody: string;
+  };
 };
 
 export async function getDashboardData(options: { createProfile?: boolean } = {}): Promise<DashboardData> {
@@ -45,7 +52,32 @@ export async function getDashboardData(options: { createProfile?: boolean } = {}
     tasks: buildTasks(sessions, memories),
     signals: buildSignals(profile.brainSnapshot.notes, sessions, memories),
     recentItems: buildRecentItems(sessions, memories),
-    nextStep: buildNextStep(sessions, memories)
+    nextStep: buildNextStep(sessions, memories),
+    profileSnapshot: buildProfileSnapshot(profile)
+  };
+}
+
+function buildProfileSnapshot(profile: Awaited<ReturnType<typeof getProfileForRead>>) {
+  const notes = profile.brainSnapshot.notes;
+  const role = asString(profile.identity.role) || profile.brainSnapshot.title;
+  const audience = asString(profile.audience.target) || profile.brainSnapshot.subtitle;
+  const tone = asString(profile.style.tone);
+  const proof = asString(profile.identity.proof);
+  const platform = normalizeStringList(profile.platform.primary).join(" / ");
+  const formats = normalizeStringList(profile.platform.formats).join("与");
+  const tags = [
+    ...splitTags(tone),
+    ...normalizeStringList(profile.platform.primary),
+    ...normalizeStringList(profile.brainSnapshot.tags)
+  ];
+  const uniqueTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))).slice(0, 3);
+
+  return {
+    title: role || "还没有填写长期定位",
+    subtitle: [audience, [platform, formats].filter(Boolean).join(" · ")].filter(Boolean).join(" · "),
+    tags: uniqueTags.length ? uniqueTags : ["先完善画像"],
+    highlightTitle: notes[0]?.title ?? "当前定位",
+    highlightBody: proof || notes[0]?.body || "去个人画像里补充定位后，这里会同步更新。"
   };
 }
 
@@ -154,6 +186,23 @@ function findMemory(memories: BrainMemoryEntry[], category: BrainMemoryEntry["ca
 
 function memorySummary(memory: BrainMemoryEntry) {
   return String(memory.value.summary ?? memory.value.body ?? memory.value.title ?? memory.key);
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
+function splitTags(value: string) {
+  return value
+    .split(/[、，,；;+\n/·]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function sessionTitle(session: AgentSession) {

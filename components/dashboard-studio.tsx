@@ -47,6 +47,8 @@ function CardIcon({ path }: { path: string }) {
 }
 
 export function DashboardStudio({ data }: { data: DashboardData }) {
+  const profile = data.profileSnapshot;
+
   return (
     <div className="dashboard-shell">
       <section className="dashboard-hero">
@@ -123,20 +125,20 @@ export function DashboardStudio({ data }: { data: DashboardData }) {
           <div className="profile-mini-head">
             <div className="profile-orb" aria-hidden="true" />
             <div>
-              <h3>陪伴型二战上岸学姐</h3>
-              <p>考研 / 学习方法 · 图文与视频</p>
+              <h3>{profile.title}</h3>
+              <p>{profile.subtitle}</p>
             </div>
           </div>
           <div className="profile-tags">
-            <span>陪伴感</span>
-            <span>方法论</span>
-            <span>不制造焦虑</span>
+            {profile.tags.map((tag) => (
+              <span key={tag}>{tag}</span>
+            ))}
           </div>
           <div className="radar-card" aria-label="画像能力概览">
             <div className="radar-shape" />
             <div className="radar-copy">
-              <strong>稳定表达</strong>
-              <span>先给结论，再补经历。</span>
+              <strong>{profile.highlightTitle}</strong>
+              <span>{profile.highlightBody}</span>
             </div>
           </div>
         </aside>
