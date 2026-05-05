@@ -70,10 +70,10 @@ const EMPTY_PROFILE_FORM: ProfileForm = {
 };
 
 const DEFAULT_PROFILE_FORM: ProfileForm = {
-  role: "我是二战上岸的人，不是天赋型选手，但我很擅长把复杂备考拆成普通人能执行的步骤。",
-  story: "从崩溃式备考到重新建立节奏，这段经历最能代表我。",
-  audience: "基础一般、容易焦虑、节奏总是断掉的考研人。",
-  tone: "有方法、稳、愿意陪着走一段，但不会高高在上。"
+  role: "我是有真实经验的内容创作者，擅长把复杂问题拆成普通人能理解、能执行的步骤。",
+  story: "从真实经历里提炼方法，把容易踩坑的地方讲清楚，这段经历最能代表我。",
+  audience: "正在被一个具体问题困住、需要可靠方法和行动顺序的人。",
+  tone: "有方法、稳、愿意把判断边界讲清楚，但不会高高在上。"
 };
 
 async function postJson<T>(url: string, body?: Record<string, unknown>) {

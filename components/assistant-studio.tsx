@@ -139,7 +139,7 @@ const TASK_CONFIG: Record<
     materialLabel: "只贴一条评论",
     uploadLabel: "上传这条评论的截图",
     uploadHint: "适合处理质疑、追问、求方法、强情绪反馈。",
-    placeholder: "例如：能不能出一期在职考研怎么切换工作和学习状态？我每天回家都学不进去。",
+    placeholder: "例如：能不能出一期更具体的操作方法？我看完还是不知道第一步该怎么做。",
     actionLabel: "拆这条评论",
     loadingLabel: "正在拆这条评论",
     resultLabel: "单条评论",
@@ -161,19 +161,19 @@ const TASK_CONFIG: Record<
 
 const fallbackOutput: AssistantOutput = {
   assistantMode: "single_comment",
-  workSummary: "作品围绕在职考研状态切换展开。",
+  workSummary: "作品围绕具体方法和下一步行动展开。",
   analysis: {
     commentIntent: "这不是普通留言，而是在请求一个能马上照做的方法。",
-    audienceEmotion: "焦虑、疲惫，还有一点想重新开始但怕失败。",
-    hiddenNeed: "用户想知道下班后怎样进入学习状态，而不是再听一遍自律口号。",
-    contentOpportunity: "可以延展成一条关于在职备考状态切换的内容。",
+    audienceEmotion: "犹豫、担心踩坑，也想确认自己能不能安全开始。",
+    hiddenNeed: "用户想知道第一步怎么做，而不是再听一遍泛泛鼓励。",
+    contentOpportunity: "可以延展成一条关于具体操作路径的内容。",
     replyDirection: "先接住真实处境，再承诺会拆一个更具体的方法。",
-    nextContentDirection: "讲下班后 15 分钟内重新坐回书桌的动作。"
+    nextContentDirection: "讲一个从判断到行动的低风险步骤。"
   },
   layers: [
     {
       type: "高价值评论",
-      quote: "能不能出一期在职考研如何切换工作和学习状态？",
+      quote: "能不能出一期更具体的操作方法？",
       action: "优先回复，并进入下一期选题池。"
     }
   ],
@@ -186,9 +186,9 @@ const fallbackOutput: AssistantOutput = {
     nextMove: "把高频问题整理成一条新内容"
   },
   replySuggestions: [
-    "你这个问题特别真实，我自己二战时最难的也不是学不会，而是每天都很难重新进入状态。后面我整理一套更适合在职备考的切换方法。"
+    "你这个问题特别真实，很多人不是不想做，而是不知道第一步怎么选。后面我会把判断标准和具体做法拆清楚。"
   ],
-  nextTopics: ["在职考研如何切换工作和学习状态"]
+  nextTopics: ["如何判断自己适不适合开始做这一步"]
 };
 
 function fileNames(files: File[]) {

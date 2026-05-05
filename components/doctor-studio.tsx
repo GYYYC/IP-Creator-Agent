@@ -250,7 +250,7 @@ const fallbackOutput: DoctorOutput = {
     {
       label: "0s - 5s",
       title: "身份建立很快",
-      description: "一开始就让人知道这是二战过来人的真实经验，信任建立得不错。"
+      description: "一开始就让人知道这是来自真实经历的判断，信任建立得不错。"
     },
     {
       label: "15s - 22s",

@@ -252,11 +252,41 @@ export function buildFallbackRun(session: AgentSession, profile: CreatorProfile)
     return buildProfileFallback(session, profile);
   }
 
-  return buildDirectorFallback(session);
+  return buildDirectorFallback(session, profile);
 }
 
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+type DirectorProfileContext = {
+  role: string;
+  proof: string;
+  audience: string;
+  tone: string;
+  topic: string;
+  tags: string[];
+};
+
+function buildDirectorProfileContext(profile: CreatorProfile): DirectorProfileContext {
+  const role = asString(profile.identity.role, profile.brainSnapshot.title || "内容创作者");
+  const proof = asString(profile.identity.proof, "有真实经历和可执行方法");
+  const audience = asString(profile.audience.target, profile.brainSnapshot.subtitle || "正在被这个问题困住的人");
+  const tone = asString(profile.style.tone, "清楚、可信、能给具体方法");
+  const tags = normalizeStringArray(profile.brainSnapshot.tags).slice(0, 4);
+  const topic =
+    profile.brainSnapshot.notes.find((note) => note.category === "topic_opportunity")?.body ||
+    profile.brainSnapshot.notes.find((note) => note.category === "audience")?.body ||
+    audience;
+
+  return {
+    role,
+    proof,
+    audience,
+    tone,
+    topic: asString(topic, audience),
+    tags: tags.length ? tags : ["真实经验", "具体方法", "可执行"]
+  };
 }
 
 function cloneDirectorSlots(): DirectorSlots {
@@ -487,8 +517,9 @@ function directorAllReady(slots: DirectorSlots) {
   return DIRECTOR_SLOT_KEYS.every((key) => slots[key].status === "ready");
 }
 
-function buildDirectorFallback(session: AgentSession): AgentRunResult {
-  const idea = asString(session.input.idea, "围绕一个真实经历做一条内容。");
+function buildDirectorFallback(session: AgentSession, profile: CreatorProfile): AgentRunResult {
+  const profileContext = buildDirectorProfileContext(profile);
+  const idea = asString(session.input.idea, `围绕“${profileContext.topic}”做一条内容。`);
   const goal = (asString(session.input.goal, "connect") as DirectorGoal) || "connect";
   const tone = (asString(session.input.tone, "warm") as DirectorTone) || "warm";
   const mode = session.contentMode;
@@ -507,15 +538,15 @@ function buildDirectorFallback(session: AgentSession): AgentRunResult {
     ["unknown", "confused", "ask_options"].includes(classifyDirectorReply(answer))
   ).length;
   const suggestions = nextSlot && slots[nextSlot].status !== "ready"
-    ? fallbackSuggestions(nextSlot, idea, mode, optionVariant)
+    ? fallbackSuggestions(nextSlot, idea, mode, optionVariant, profileContext)
     : [];
   const nextQuestion = nextSlot ? fallbackQuestion(nextSlot, slots[nextSlot].status, idea, mode) : undefined;
   const complete =
     revisionRequests.length > 0 ||
     directorAllReady(slots);
-  const rootProblem = slots.rootProblem.value || "用户真正卡住的是状态断掉后不知道怎么重新开始";
-  const changeTarget = slots.changeTarget.value || "让用户先恢复可执行的小节奏，而不是一上来逼自己加时长";
-  const coreConclusion = slots.corePromise.value || "先恢复节奏，再谈努力";
+  const rootProblem = slots.rootProblem.value || profileContext.audience;
+  const changeTarget = slots.changeTarget.value || `让${mode === "graphic" ? "读者" : "观众"}先找到一个现在就能执行的小动作`;
+  const coreConclusion = slots.corePromise.value || "先做一件能开始的事";
   const anchor = coreConclusion;
   const middle = `${rootProblem}。${changeTarget}`;
   const proof = rootProblem;
@@ -529,7 +560,10 @@ function buildDirectorFallback(session: AgentSession): AgentRunResult {
             { title: "正文结构", content: `${idea} ${middle}。` },
             { title: "结尾引导", content: `结尾问读者现在最卡的步骤，并用“${proof}”收住。` }
           ],
-          hooks: ["如果你不是天赋型选手，这篇可能更适合你。", "别急着逼自己加时长，先把节奏找回来。"]
+          hooks: [
+            `如果你也卡在“${rootProblem}”，这篇先别划走。`,
+            `${profileContext.role}最想提醒你：${anchor}`
+          ]
         }
       : {
           intro: `这条视频更偏 ${GOAL_LABELS[goal]}，语气走 ${TONE_LABELS[tone]}。`,
@@ -539,14 +573,14 @@ function buildDirectorFallback(session: AgentSession): AgentRunResult {
             { title: "结尾", content: `用 3 个短动作收住，再引导评论区提问。${proof}。` }
           ],
           hooks: [
-            "考研失败后最难的不是重来，而是不再怀疑自己还能不能行。",
-            "别急着猛加学习时长，先做这三个动作把节奏拉回来。"
+            `如果你也卡在“${rootProblem}”，先听这一句。`,
+            `${profileContext.role}最想提醒你：${anchor}`
           ]
         };
   const output =
     mode === "graphic"
-      ? buildGraphicOutput({ idea, goal, tone, outputSpec, anchor, middle, proof, action, revisionRequests })
-      : buildVideoOutput({ idea, goal, tone, outputSpec, anchor, middle, proof, action, revisionRequests });
+      ? buildGraphicOutput({ idea, goal, tone, outputSpec, anchor, middle, proof, action, revisionRequests, profileContext })
+      : buildVideoOutput({ idea, goal, tone, outputSpec, anchor, middle, proof, action, revisionRequests, profileContext });
 
   const candidates: MemoryCandidate[] = complete
     ? [
@@ -745,7 +779,7 @@ function isSlotAnswerReady(slot: DirectorSlotKey, value: string, rawAnswer: stri
   const length = value.replace(/\s/g, "").length;
 
   if (slot === "rootProblem") {
-    return length >= 16 && /(人|观众|读者|考研|二战|学生|上岸|成绩|书桌|学不进去|状态|怀疑)/.test(value);
+    return length >= 16 && /(人|观众|读者|用户|粉丝|群体|想要|需要|担心|害怕|卡住|状态|问题|困难|选择|行动|坚持|怀疑)/.test(value);
   }
 
   if (slot === "changeTarget") {
@@ -797,24 +831,37 @@ function linearFallbackQuestion(slot: DirectorSlotKey, status: DirectorSlot["sta
     : "把这句话再收紧一点，最有力的版本是什么？";
 }
 
-function fallbackSuggestions(slot: DirectorSlotKey, _idea: string, mode: ContentMode, variant = 0) {
+function fallbackSuggestions(
+  slot: DirectorSlotKey,
+  _idea: string,
+  mode: ContentMode,
+  variant = 0,
+  profileContext: DirectorProfileContext = {
+    role: "内容创作者",
+    proof: "有真实经历和可执行方法",
+    audience: "正在被这个问题困住的人",
+    tone: "清楚、可信、能给具体方法",
+    topic: "一个具体问题",
+    tags: ["真实经验", "具体方法", "可执行"]
+  }
+) {
   const audience = mode === "graphic" ? "读者" : "观众";
   if (slot === "rootProblem") {
     const groups = [
       [
-        `正在低谷里想重新开始的${audience}`,
-        `努力过但开始怀疑自己的${audience}`,
-        `看了方法却还是动不起来的${audience}`
+        `被${profileContext.topic.slice(0, 10)}卡住的${audience}`,
+        `想要更稳妥方法的${audience}`,
+        `试过很多次但没坚持住的${audience}`
       ],
       [
-        `坐到书桌前学不进去的${audience}`,
-        `决定重来但迟迟没开始的${audience}`,
-        `看到别人进度就慌的${audience}`
+        `担心自己做错选择的${audience}`,
+        `知道要改变但启动不了的${audience}`,
+        `需要具体步骤的${audience}`
       ],
       [
-        `刚查完成绩很崩的${audience}`,
-        `已经摆烂几周的${audience}`,
-        `每天计划重启又失败的${audience}`
+        `刚开始接触这个问题的${audience}`,
+        `反复尝试却没看到结果的${audience}`,
+        `想降低风险再行动的${audience}`
       ]
     ];
     return groups[variant % groups.length];
@@ -822,17 +869,17 @@ function fallbackSuggestions(slot: DirectorSlotKey, _idea: string, mode: Content
 
   if (slot === "changeTarget") {
     const groups = [
-      ["先平静下来", "重新坐回书桌前", "停止拿自己和别人比"],
-      ["先完成一个小任务", "把任务拆到能开始", "不再用低效否定自己"],
-      ["先承认自己还想重来", "先把今天稳住", "先恢复每天打开书的动作"]
+      ["先做一个小动作", "先避开最容易踩的坑", "先判断自己适不适合"],
+      ["把目标拆到能开始", "先用安全方法试一次", "不再只靠硬扛"],
+      ["先稳住当前节奏", "先找到最关键变量", "先照顾好长期坚持"]
     ];
     return groups[variant % groups.length];
   }
 
   const groups = [
-    ["平静下来，我一定可以", "先坐回来，再谈效率", "能开始一点，就在恢复"],
-    ["不是你不行，是还没缓过来", "先稳住，再重新开始", "回来这一步已经很重要"],
-    ["别急着证明，先回来", "今天能开始，就不算输", "先把自己从慌里拉回来"]
+    ["先做对一小步", "能坚持，才真的有效", "安全感比速度更重要"],
+    ["别急着硬扛，先找方法", "先稳住，再变好", "长期有效才值得选"],
+    ["先降低风险，再开始", "别只看结果，先看路径", "做得到，才有意义"]
   ];
   return groups[variant % groups.length];
 }
@@ -862,14 +909,20 @@ function buildVideoOutput(params: {
   proof: string;
   action: string;
   revisionRequests: string[];
+  profileContext: DirectorProfileContext;
 }) {
   const revision = params.revisionRequests.at(-1);
+  const viewer = params.profileContext.audience;
+  const role = params.profileContext.role;
+  const topic = params.profileContext.topic;
+  const proofLine = params.profileContext.proof;
   const opening =
-    "如果你也有一段时间完全学不进去，先别急着骂自己。真正要先恢复的，不是学习时长，而是你每天还能坐回书桌前的节奏。";
+    `如果你也正卡在“${params.proof}”，先别急着硬扛。真正要先解决的，不是把道理听得更满，而是找到一个现在就能开始的小动作。`;
   const body =
-    "我二战那段时间最崩的地方，是明明知道该学什么，但一打开书就开始怀疑自己。后来我没有再逼自己一天学十几个小时，而是先做三件很小的事。第一，把每天的任务缩到不会失败的程度。第二，只盯住当天最重要的一块，不再用别人的进度吓自己。第三，每天结束前留一句复盘：今天哪一步让我重新动起来了。";
+    `${role}最需要讲清楚的是：这件事不要只看结果，要先看路径。第一，先判断自己是不是属于“${viewer}”。第二，把目标拆成一个低风险、能立刻验证的小步骤。第三，做完以后复盘一句：这一步有没有让我更接近真正想要的状态。这样内容就不会只是在鼓励，而是在帮人做判断。`;
   const ending =
-    "如果你现在也卡在重启状态这一步，可以先在评论区留一句：你最难开始的是哪一科。我会按大家的问题继续拆。";
+    `如果你也在纠结“${topic}”，可以在评论区留一句你现在最卡的地方，我会按大家的问题继续拆。`;
+  const coreTitle = params.anchor || "先做一件能开始的事";
 
   return {
     type: "video_script",
@@ -881,9 +934,9 @@ function buildVideoOutput(params: {
       tone: TONE_LABELS[params.tone]
     },
     titleOptions: [
-      "考研失败后，先别急着逼自己加时长",
-      "状态崩掉时，先做这 3 个动作",
-      "二战重启最重要的不是鸡血"
+      `${coreTitle}，比硬扛更重要`,
+      `卡在“${params.proof}”时，先做这 3 步`,
+      `${viewer}最该先听懂的一句话`
     ],
     timeline: [
       {
@@ -896,7 +949,7 @@ function buildVideoOutput(params: {
         time: "3-18s",
         role: "建立共鸣",
         script: opening,
-        visual: "切到书桌、计划本、暂停的计时器。"
+        visual: "切到真实素材、操作细节或能证明处境的画面。"
       },
       {
         time: "18-48s",
@@ -907,12 +960,12 @@ function buildVideoOutput(params: {
       {
         time: "48-60s",
         role: "引导互动",
-        script: `${params.proof} ${params.action || ending}`,
+        script: `${proofLine} ${params.action || ending}`,
         visual: "回到正脸，结尾字幕停 1 秒。"
       }
     ],
     finalScript: `${revision ? `这版按“${revision}”调整。\n\n` : ""}${opening}\n\n${body}\n\n${ending}`,
-    subtitles: ["先恢复节奏", "任务小到不会失败", "别拿别人进度吓自己", "评论区留下你最卡的一科"],
+    subtitles: [coreTitle, "先判断适不适合", "拆成一个小步骤", "评论区留下你最卡的地方"],
     publishChecklist: ["前 3 秒先给判断", "背景不要超过 2 句", "方法控制在 3 个动作", "结尾只问一个问题"]
   };
 }
@@ -927,10 +980,16 @@ function buildGraphicOutput(params: {
   proof: string;
   action: string;
   revisionRequests: string[];
+  profileContext: DirectorProfileContext;
 }) {
   const revision = params.revisionRequests.at(-1);
+  const reader = params.profileContext.audience;
+  const role = params.profileContext.role;
+  const topic = params.profileContext.topic;
+  const proofLine = params.profileContext.proof;
+  const coreTitle = params.anchor || "先做一件能开始的事";
   const body =
-    "考研失败后，我最怕的不是重新学一遍，而是每天坐到书桌前都会怀疑自己是不是不适合这条路。\n\n后来我发现，状态崩掉的时候，不要先给自己排特别狠的计划。计划越狠，越容易再次证明“我做不到”。真正有用的是先把节奏拉回来。\n\n第一步，把任务缩小到不会失败。不要一上来就要求自己学满十小时，先完成一件能让你重新开始的小事。\n\n第二步，只盯住今天最重要的一块。别人学到哪里不重要，你今天能不能把最该补的地方推进一点，才重要。\n\n第三步，每晚写一句复盘。不是写长篇日记，只写今天哪个动作让你重新动起来了。\n\n如果你现在也处在重启阶段，先别急着证明自己很努力。先证明自己还能回来。";
+    `${params.proof}的时候，最容易犯的错是直接去追一个很大的结果。\n\n但对${reader}来说，真正有用的内容不是一句“你要坚持”，而是把判断和行动拆清楚。\n\n第一步，先确认这件事和自己有没有关系。不要只看别人怎么做，要先看自己的状态、边界和能承受的成本。\n\n第二步，把目标拆成一个今天就能验证的小动作。动作越具体，越容易知道自己到底卡在哪里。\n\n第三步，做完以后复盘一句：这一步有没有让我更安全、更接近想要的结果。\n\n${role}要给人的不是焦虑，而是一条能照着走的路。${proofLine}`;
 
   return {
     type: "graphic_note",
@@ -942,14 +1001,14 @@ function buildGraphicOutput(params: {
       tone: TONE_LABELS[params.tone]
     },
     titleOptions: [
-      "考研失败后，我是这样重新进入状态的",
-      "状态崩掉时，别先逼自己加时长",
-      "二战重启真正有用的 3 个动作"
+      `${coreTitle}，先看这 3 步`,
+      `如果你也卡在“${params.proof}”`,
+      `${reader}最需要的不是硬扛`
     ],
-    coverText: "先恢复节奏，再谈努力",
+    coverText: coreTitle,
     body: `${revision ? `这版按“${revision}”调整。\n\n` : ""}${body}`,
-    finalScript: `${revision ? `这版按“${revision}”调整。\n\n` : ""}${body}\n\n结尾可以问：你现在最难重新开始的是哪一科？`,
-    tags: ["考研二战", "学习方法", "考研心态", "普通人备考"],
+    finalScript: `${revision ? `这版按“${revision}”调整。\n\n` : ""}${body}\n\n结尾可以问：你现在最想先解决“${topic}”里的哪一步？`,
+    tags: params.profileContext.tags,
     publishChecklist: ["首图先给结论", "正文每段只讲一个动作", "结尾问具体问题", "标题避免泛泛焦虑"]
   };
 }
@@ -972,7 +1031,7 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
   const workFileNames = normalizeStringArray(session.input.workFileNames).filter(
     (name) => name !== "还没有选择文件"
   );
-  const text = comments || (screenshotFileNames.length ? `评论截图：${screenshotFileNames.join("、")}` : "能不能出一期在职考研如何切换工作和学习状态？");
+  const text = comments || (screenshotFileNames.length ? `评论截图：${screenshotFileNames.join("、")}` : "能不能出一期更具体的操作方法？我看完还是不知道第一步该怎么做。");
   const missingWork = !workContext && !workFileNames.length;
   const missingMaterial = !comments && !screenshotFileNames.length;
 
@@ -1001,7 +1060,7 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
     key: "comment_topic_request",
     value: {
       title: "评论区选题机会",
-      summary: "用户持续关心在职考研状态切换、时间管理和低焦虑执行方法。"
+      summary: "用户持续关心具体方法、风险边界和下一步行动。"
     },
     reason: "评论表达了可延展成下一期内容的真实需求。",
     confidence: 0.7,
@@ -1017,24 +1076,24 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
     draft: {},
     output: {
       assistantMode,
-      workSummary: `${sourceType} 的评论重点落在“状态切换”和“低焦虑执行”上。`,
+      workSummary: `${sourceType} 的评论重点落在“具体方法”和“下一步行动”上。`,
       analysis:
         assistantMode === "single_comment"
           ? {
               commentIntent: "这条评论不是随口提问，而是在请求一个能马上照做的方法。",
-              audienceEmotion: "疲惫、焦虑，想重新开始但担心再次失败。",
-              hiddenNeed: "用户想知道下班后怎么进入学习状态，而不是再听自律口号。",
-              contentOpportunity: "可以延展成一条在职备考状态切换内容。",
+              audienceEmotion: "犹豫、担心踩坑，想确认自己能不能安全开始。",
+              hiddenNeed: "用户想知道第一步怎么做，而不是再听泛泛鼓励。",
+              contentOpportunity: "可以延展成一条更具体的操作拆解内容。",
               replyDirection: "先接住处境，再承诺拆具体方法。",
-              nextContentDirection: "讲下班后 15 分钟内重新坐回书桌的动作。"
+              nextContentDirection: "讲一个从判断到行动的低风险步骤。"
             }
           : {
-              sectionDirection: "评论区反复在问状态切换、时间管理和低焦虑执行。",
-              audienceEmotion: "大家不是不想学，而是被疲惫和失败感拖住。",
-              hiddenNeed: "用户需要一套下班后还能启动的小动作。",
-              contentOpportunity: "下一条内容可以专门回应在职备考如何重新进入状态。",
+              sectionDirection: "评论区反复在问具体方法、适用边界和行动顺序。",
+              audienceEmotion: "大家不是没有兴趣，而是担心照做后没效果或有风险。",
+              hiddenNeed: "用户需要一套能判断、能开始、能复盘的小步骤。",
+              contentOpportunity: "下一条内容可以专门回应“第一步到底怎么做”。",
               replyDirection: "优先回复最具体的问题，把它置顶成下一期入口。",
-              nextContentDirection: "做一条“下班后学不进去怎么办”的内容。"
+              nextContentDirection: "做一条“先判断，再开始”的内容。"
             },
       layers: [
         {
@@ -1061,9 +1120,9 @@ function buildAssistantFallback(session: AgentSession): AgentRunResult {
             : "把评论区高频问题整理成一条新内容"
       },
       replySuggestions: [
-        "你这个问题特别真实，我自己二战时最难的也不是学不会，而是每天都很难重新进入状态。后面我整理一套更适合在职备考的切换方法。"
+        "你这个问题特别真实，很多人不是不想做，而是不知道第一步怎么选。后面我会把判断标准和具体做法拆清楚。"
       ],
-      nextTopics: ["在职考研如何切换工作和学习状态"]
+      nextTopics: ["如何判断自己适不适合开始做这一步"]
     },
     writebackCandidates: [candidate]
   };

@@ -1,18 +1,18 @@
 import { BrainSnapshot, CreatorProfile } from "@/lib/agent/types";
 
 export const DEFAULT_BRAIN_SNAPSHOT: BrainSnapshot = {
-  title: "陪伴型二战上岸学姐",
-  subtitle: "考研 / 学习方法 · 小红书图文与视频",
-  tags: ["陪伴感", "方法论", "不制造焦虑"],
+  title: "真实经验内容创作者",
+  subtitle: "个人经验 / 实用方法 · 图文与视频",
+  tags: ["真实经验", "具体方法", "不制造焦虑"],
   notes: [
     {
       title: "目标受众",
-      body: "基础一般、节奏不稳、容易怀疑自己的考研用户。",
+      body: "正在被一个具体问题困住、需要可执行建议的用户。",
       category: "audience"
     },
     {
       title: "高表现内容",
-      body: "在职考研时间管理、二战如何重启状态。",
+      body: "真实经历拆解、避坑提醒、下一步行动建议。",
       category: "topic_opportunity"
     },
     {
@@ -34,14 +34,14 @@ export function createDefaultProfile(id: string, anonId: string): CreatorProfile
   return {
     id,
     anonId,
-    displayName: "考研方法创作者",
+    displayName: "内容创作者",
     identity: {
-      role: "二战上岸的陪伴型学姐",
-      proof: "有真实备考重启经历，擅长把复杂备考拆成普通人能执行的步骤。"
+      role: "有真实经验的内容创作者",
+      proof: "擅长把复杂问题拆成普通人能理解、能执行的步骤。"
     },
     audience: {
-      target: "基础一般、容易焦虑、节奏总是断掉的考研人。",
-      painPoint: "不是不知道要学什么，而是不知道怎样稳定地坚持。"
+      target: "正在被一个具体问题困住、需要可靠方法的人。",
+      painPoint: "不是完全不知道方向，而是不知道下一步怎么安全地开始。"
     },
     style: {
       tone: "温和陪伴 + 方法论",

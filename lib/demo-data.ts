@@ -7,17 +7,17 @@ export const navItems = [
 ];
 
 export const creatorMemory = {
-  title: "陪伴型二战上岸学姐",
-  subtitle: "考研 / 学习方法 · 小红书图文与视频",
-  tags: ["陪伴感", "方法论", "不制造焦虑"],
+  title: "真实经验内容创作者",
+  subtitle: "个人经验 / 实用方法 · 图文与视频",
+  tags: ["真实经验", "方法论", "不制造焦虑"],
   notes: [
     {
       title: "目标受众",
-      body: "基础一般、节奏不稳、容易怀疑自己的考研用户。"
+      body: "正在被一个具体问题困住、需要可执行建议的用户。"
     },
     {
       title: "高表现内容",
-      body: "在职考研时间管理、二战如何重启状态。"
+      body: "真实经历拆解、避坑提醒、下一步行动建议。"
     },
     {
       title: "历史风险",
@@ -81,7 +81,7 @@ export const onboardingFlow = [
         key: "first-impression",
         label: "如果别人第一次刷到你，你最希望他们先记住什么？",
         placeholder:
-          "例如：我是二战上岸的人，不是天赋型选手，但我很擅长把复杂备考拆成普通人能执行的步骤。"
+          "例如：我是有真实经验的人，擅长把复杂问题拆成普通人能理解、能执行的步骤。"
       },
       {
         key: "story-source",
@@ -105,7 +105,7 @@ export const onboardingFlow = [
       {
         key: "audience",
         label: "你最想影响的是哪类人？",
-        placeholder: "例如：基础一般、容易焦虑、节奏总是断掉的考研人。"
+        placeholder: "例如：正在被一个具体问题困住、需要可靠方法和行动顺序的人。"
       },
       {
         key: "pain-point",
@@ -134,7 +134,7 @@ export const onboardingFlow = [
       {
         key: "reference",
         label: "有没有你喜欢的表达方式或创作者类型？",
-        placeholder: "例如：陪伴型学姐、方法论老师、反焦虑成长型博主。"
+        placeholder: "例如：真实经验型创作者、方法论老师、反焦虑成长型博主。"
       }
     ],
     preview: [
@@ -206,11 +206,11 @@ export const directorDrafts = {
   outlines: [
     {
       title: "开头",
-      content: "先讲一句最扎心的感受：失败之后最难的不是重学，而是不再怀疑自己。"
+      content: "先讲一句最关键的判断：真正卡住你的，可能不是意志力，而是第一步太大。"
     },
     {
       title: "中段",
-      content: "快速交代你二战时最难的那个阶段，然后直接切进你怎么把状态拉回来的。"
+      content: "快速交代真实处境，然后直接切进你怎么把问题拆成能执行的小动作。"
     },
     {
       title: "结尾",
@@ -218,8 +218,8 @@ export const directorDrafts = {
     }
   ],
   hooks: [
-    "如果你也经历过一次考研失败，你会知道最难的不是重来，而是不再怀疑自己还能不能行。",
-    "考研失败后别急着猛加时长，先把学习节奏重新拉回来。今天只讲我二战时最有用的三个动作。"
+    "如果你也卡在这一步，先别急着硬扛。",
+    "今天不讲大道理，只讲一个能立刻开始的小动作。"
   ]
 };
 
@@ -238,7 +238,7 @@ export const videoTimeline = [
   {
     label: "0s - 5s",
     title: "身份建立很快",
-    description: "你一开始就让人知道这是二战过来人的真实经验，信任建立得不错。",
+    description: "你一开始就让人知道这是来自真实经历的判断，信任建立得不错。",
     variant: "success"
   },
   {
@@ -258,7 +258,7 @@ export const videoTimeline = [
 export const assistantItems = [
   {
     type: "高价值评论",
-    quote: "能不能出一期在职考研如何切换工作和学习状态？",
+    quote: "能不能出一期更具体的操作方法？",
     action: "优先回复，并进入下一期选题池。"
   },
   {
@@ -268,7 +268,7 @@ export const assistantItems = [
   },
   {
     type: "适合置顶",
-    quote: "学姐这个时间分配表能不能做成模板？",
+    quote: "这个步骤能不能做成模板？",
     action: "建议置顶，并承接成下一期内容或资料钩子。"
   }
 ];
