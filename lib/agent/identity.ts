@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { createDefaultProfile } from "@/lib/agent/defaults";
-import { getStore, upsertProfile } from "@/lib/agent/store";
+import { getProfileByAnonId, upsertProfile } from "@/lib/agent/store";
 import { CreatorProfile } from "@/lib/agent/types";
 
 export const ANON_COOKIE = "ip_creator_anon_id";
@@ -31,8 +31,7 @@ export async function getOrCreateAnonId() {
 
 export async function getOrCreateProfile(): Promise<CreatorProfile> {
   const anonId = await getOrCreateAnonId();
-  const store = await getStore();
-  const existing = store.profiles.find((profile) => profile.anonId === anonId);
+  const existing = await getProfileByAnonId(anonId);
 
   if (existing) {
     return existing;
@@ -49,8 +48,7 @@ export async function getProfileForRead(): Promise<CreatorProfile> {
     return createDefaultProfile("profile_preview", "anon_preview");
   }
 
-  const store = await getStore();
-  const existing = store.profiles.find((profile) => profile.anonId === anonId);
+  const existing = await getProfileByAnonId(anonId);
 
   return existing ?? createDefaultProfile("profile_preview", anonId);
 }

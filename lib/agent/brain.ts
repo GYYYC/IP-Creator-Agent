@@ -1,5 +1,5 @@
 import { createId } from "@/lib/agent/identity";
-import { getStore, insertMemory, upsertProfile } from "@/lib/agent/store";
+import { getMemoriesByProfile, insertMemory, upsertProfile } from "@/lib/agent/store";
 import {
   AgentModule,
   BrainMemoryEntry,
@@ -10,10 +10,7 @@ import {
 const MAX_BRAIN_NOTES = 8;
 
 export async function loadBrain(profile: CreatorProfile) {
-  const store = await getStore();
-  const memories = store.memories
-    .filter((item) => item.profileId === profile.id)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const memories = await getMemoriesByProfile(profile.id);
 
   return {
     profile,

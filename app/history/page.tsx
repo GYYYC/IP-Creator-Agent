@@ -5,7 +5,10 @@ import { getHistoryData } from "@/lib/agent/history-data";
 export const dynamic = "force-dynamic";
 
 export default async function HistoryPage() {
-  const { entries } = await getHistoryData();
+  const { entries } = await getHistoryData().catch((error) => {
+    console.error("[History] failed to load data", error);
+    return { entries: [] };
+  });
 
   return (
     <main>

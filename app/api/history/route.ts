@@ -4,5 +4,10 @@ import { jsonOk } from "@/lib/agent/http";
 export const runtime = "nodejs";
 
 export async function GET() {
-  return jsonOk(await getHistoryData({ createProfile: true }));
+  const data = await getHistoryData({ createProfile: true }).catch((error) => {
+    console.error("[History API] failed to load data", error);
+    return { entries: [] };
+  });
+
+  return jsonOk(data);
 }

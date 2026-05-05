@@ -20,15 +20,7 @@ const storeDirectory =
   process.env.AGENT_STORE_DIR ||
   (process.env.VERCEL ? path.join("/tmp", "ip-creator-agent") : path.join(process.cwd(), ".data"));
 const storePath = path.join(storeDirectory, "agent-store.json");
-const databaseUrl =
-  process.env.DATABASE_URL ||
-  process.env.DATABASE_POSTGRES_URL ||
-  process.env.DATABASE_POSTGRES_PRISMA_URL ||
-  process.env.DATABASE_POSTGRES_URL_NON_POOLING ||
-  process.env.POSTGRES_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  "";
+const databaseUrl = pickDatabaseUrl();
 const poolConnectionString = normalizeDatabaseUrlForPg(databaseUrl);
 const STRIPPED_ARTIFACT_JSON_SQL = "data #- '{extractedJson,visualDataUrl}'";
 
@@ -40,6 +32,36 @@ function useDatabase() {
   return Boolean(databaseUrl);
 }
 
+function pickDatabaseUrl() {
+  const candidates = [
+    process.env.DATABASE_URL,
+    process.env.SUPABASE_POSTGRES_URL,
+    process.env.SUPABASE_POSTGRES_PRISMA_URL,
+    process.env.SUPABASE_POSTGRES_URL_NON_POOLING,
+    process.env.DATABASE_POSTGRES_URL,
+    process.env.DATABASE_POSTGRES_PRISMA_URL,
+    process.env.DATABASE_POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_URL,
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL_NON_POOLING
+  ];
+
+  return candidates.find(isPostgresUrl) ?? "";
+}
+
+function isPostgresUrl(value: string | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "postgres:" || url.protocol === "postgresql:";
+  } catch {
+    return false;
+  }
+}
+
 function normalizeDatabaseUrlForPg(value: string) {
   if (!value) {
     return value;
@@ -49,6 +71,11 @@ function normalizeDatabaseUrlForPg(value: string) {
     const url = new URL(value);
     const sslMode = url.searchParams.get("sslmode");
 
+    if (isSupabasePoolerUrl(url) && (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca")) {
+      url.searchParams.set("sslmode", "no-verify");
+      return url.toString();
+    }
+
     if (sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca") {
       url.searchParams.set("sslmode", "verify-full");
     }
@@ -57,6 +84,10 @@ function normalizeDatabaseUrlForPg(value: string) {
   } catch {
     return value;
   }
+}
+
+function isSupabasePoolerUrl(url: URL) {
+  return url.hostname.endsWith(".pooler.supabase.com") || url.hostname.endsWith(".supabase.co");
 }
 
 function isLocalDatabaseUrl(value: string) {
@@ -209,6 +240,92 @@ export async function getProfileById(profileId: string) {
 
   const store = await readStore();
   return store.profiles.find((profile) => profile.id === profileId) ?? null;
+}
+
+export async function getProfileByAnonId(anonId: string) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: CreatorProfile }>(
+      "select data from agent_profiles where data->>'anonId' = $1 order by updated_at desc limit 1",
+      [anonId]
+    );
+
+    return result.rows[0]?.data ?? null;
+  }
+
+  const store = await readStore();
+  return store.profiles.find((profile) => profile.anonId === anonId) ?? null;
+}
+
+export async function getMemoriesByProfile(profileId: string, limit = 50) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: BrainMemoryEntry }>(
+      `select data from agent_memories
+       where profile_id = $1
+       order by created_at desc
+       limit $2`,
+      [profileId, limit]
+    );
+
+    return result.rows.map((row) => row.data);
+  }
+
+  const store = await readStore();
+  return store.memories
+    .filter((memory) => memory.profileId === profileId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
+}
+
+export async function getSessionsByProfile(profileId: string, limit = 50) {
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: AgentSession }>(
+      `select data from agent_sessions
+       where profile_id = $1
+       order by updated_at desc
+       limit $2`,
+      [profileId, limit]
+    );
+
+    return result.rows.map((row) => row.data);
+  }
+
+  const store = await readStore();
+  return store.sessions
+    .filter((session) => session.profileId === profileId)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, limit);
+}
+
+export async function getArtifactsForSessions(profileId: string, sessions: AgentSession[]) {
+  const sessionIds = sessions.map((session) => session.id);
+  const artifactIds = Array.from(new Set(sessions.flatMap((session) => session.artifactIds ?? [])));
+
+  if (useDatabase()) {
+    await ensureDatabase();
+    const result = await getPool().query<{ data: ArtifactRecord }>(
+      `select ${STRIPPED_ARTIFACT_JSON_SQL} as data
+       from agent_artifacts
+       where profile_id = $1
+       and (session_id = any($2::text[]) or id = any($3::text[]))
+       order by created_at desc`,
+      [profileId, sessionIds, artifactIds]
+    );
+
+    return result.rows.map((row) => stripArtifactVisualData(row.data));
+  }
+
+  const sessionIdSet = new Set(sessionIds);
+  const artifactIdSet = new Set(artifactIds);
+  const store = await readStore();
+  return store.artifacts
+    .filter((artifact) =>
+      artifact.profileId === profileId &&
+      (artifactIdSet.has(artifact.id) || Boolean(artifact.sessionId && sessionIdSet.has(artifact.sessionId)))
+    )
+    .map(stripArtifactVisualData);
 }
 
 export async function getSessionById(sessionId: string) {

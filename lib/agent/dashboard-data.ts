@@ -1,6 +1,6 @@
 import { loadBrain } from "@/lib/agent/brain";
 import { getOrCreateProfile, getProfileForRead } from "@/lib/agent/identity";
-import { getStore } from "@/lib/agent/store";
+import { getSessionsByProfile } from "@/lib/agent/store";
 import { AgentSession, BrainMemoryEntry } from "@/lib/agent/types";
 
 type WorkSession = AgentSession & { module: Exclude<AgentSession["module"], "profile"> };
@@ -37,15 +37,58 @@ export type DashboardData = {
   };
 };
 
+export function emptyDashboardData(): DashboardData {
+  return {
+    tasks: [
+      {
+        title: "数据库暂时不可用",
+        detail: "当前数据库流量额度已满，页面先进入保护模式。额度恢复后会重新显示历史数据。",
+        href: "/profile",
+        action: "查看画像"
+      },
+      {
+        title: "继续完善内容",
+        detail: "可以先检查环境额度或清理旧素材大字段，再继续使用创作流程。",
+        href: "/director",
+        action: "去创作"
+      },
+      {
+        title: "稍后再看历史",
+        detail: "历史数据没有被前端删除，只是数据库现在拒绝读取。",
+        href: "/history",
+        action: "去记录"
+      }
+    ],
+    signals: [
+      { label: "当前状态", value: "数据库额度已满" },
+      { label: "历史数据", value: "等待数据库恢复读取" },
+      { label: "建议动作", value: "清理大图字段或升级额度" },
+      { label: "页面保护", value: "已避免直接崩页" }
+    ],
+    recentItems: [],
+    nextStep: {
+      title: "先恢复数据库读取",
+      detail: "执行清理 SQL 或等待额度重置后，历史记录会重新显示。",
+      href: "/history",
+      action: "查看记录"
+    },
+    profileSnapshot: {
+      title: "个人画像暂时无法读取",
+      subtitle: "数据库额度已满",
+      tags: ["保护模式"],
+      highlightTitle: "数据没有被前端删除",
+      highlightBody: "这是数据库拒绝读取导致的临时不可见。"
+    }
+  };
+}
+
 export async function getDashboardData(options: { createProfile?: boolean } = {}): Promise<DashboardData> {
   const profile = options.createProfile ? await getOrCreateProfile() : await getProfileForRead();
   const brain = await loadBrain(profile);
-  const store = await getStore();
-  const sessions = store.sessions
+  const sessions = (await getSessionsByProfile(profile.id, 24))
     .filter((session): session is WorkSession =>
       session.profileId === profile.id && session.module !== "profile"
-    )
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    );
   const memories = brain.memories;
 
   return {

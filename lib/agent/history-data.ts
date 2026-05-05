@@ -1,5 +1,5 @@
 import { getOrCreateProfile, getProfileForRead } from "@/lib/agent/identity";
-import { getStore } from "@/lib/agent/store";
+import { getArtifactsForSessions, getMemoriesByProfile, getSessionsByProfile } from "@/lib/agent/store";
 import { AgentSession, BrainMemoryEntry } from "@/lib/agent/types";
 
 type RecordModule = Exclude<AgentSession["module"], "profile">;
@@ -19,14 +19,12 @@ export type HistoryEntry = {
 
 export async function getHistoryData(options: { createProfile?: boolean } = {}): Promise<{ entries: HistoryEntry[] }> {
   const profile = options.createProfile ? await getOrCreateProfile() : await getProfileForRead();
-  const store = await getStore();
-  const memories = store.memories.filter((memory) => memory.profileId === profile.id);
-  const artifacts = store.artifacts.filter((artifact) => artifact.profileId === profile.id);
-  const sessions = store.sessions
+  const memories = await getMemoriesByProfile(profile.id, 80);
+  const sessions = (await getSessionsByProfile(profile.id, 80))
     .filter((session): session is AgentSession & { module: RecordModule } =>
       session.profileId === profile.id && session.module !== "profile"
-    )
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    );
+  const artifacts = await getArtifactsForSessions(profile.id, sessions);
 
   return {
     entries: sessions.map((session) => {
