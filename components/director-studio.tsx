@@ -304,16 +304,32 @@ function normalizeStringList(value: unknown) {
     : [];
 }
 
-function normalizeSlot(value: unknown): DirectorSlot {
-  const record = asRecord(value);
+function normalizeSlot(source: unknown): DirectorSlot {
+  const record = asRecord(source);
+  const rawValue = asString(record.value);
+  const slotValue = isDirectorNonAnswer(rawValue) ? "" : rawValue;
+  const status = slotValue ? normalizeSlotStatus(record.status) : "empty";
 
   return {
-    status: normalizeSlotStatus(record.status),
-    value: asString(record.value),
+    status,
+    value: slotValue,
     confidence: typeof record.confidence === "number" ? record.confidence : 0,
     missing: normalizeStringList(record.missing),
     evidence: normalizeStringList(record.evidence)
   };
+}
+
+function isDirectorNonAnswer(value: string) {
+  const normalized = value.replace(/\s/g, "");
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /^(不知道|不清楚|没想好|随便|你来定|没有|无)$/i.test(normalized) ||
+    /(我也不知道|不知道.*(帮我|你帮|总结|想|定)|不清楚.*(帮我|你帮|总结|想|定)|没想好.*(帮我|你帮|总结|想|定)|帮我总结|帮我想|帮我定|你帮我总结|你帮我想|你帮我定|你来总结|你来想|你来定)/.test(normalized)
+  );
 }
 
 function normalizeSlots(value: unknown): DirectorSlots {

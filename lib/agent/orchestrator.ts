@@ -40,7 +40,8 @@ ${resultSchemaForModule(session.module)}`,
   });
   const result = normalizeRunResult(
     rawResult,
-    fallback
+    fallback,
+    { session }
   );
 
   if (session.module === "doctor" && typeof rawResult.__aiStatus === "string") {
@@ -130,7 +131,9 @@ function resultSchemaForModule(module: AgentSession["module"]) {
   "assistantMessage": "给用户看的简短说明",
   "nextQuestion": "如果还需要追问，给出下一问；否则为空字符串",
   "nextSlot": "rootProblem|changeTarget|corePromise|null",
-  "replyType": "answer|confused|unknown|ask_options|revision|off_track",
+  "replyType": "answer|help_me_decide|confused|unknown|ask_options|revision|off_track",
+  "shouldUpdateSlot": true,
+  "slotUpdate": { "slotKey": "rootProblem|changeTarget|corePromise|null", "status": "empty|partial|ready", "value": "", "confidence": 0, "missing": [], "evidence": [] },
   "nextAction": "ask|offer_options|draft",
   "suggestions": [],
   "slots": {

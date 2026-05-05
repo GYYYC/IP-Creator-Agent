@@ -117,8 +117,8 @@ ready:
 - 如果无法确定，必须保守判为 partial 或 empty，禁止为了成稿强行判 ready。
 
 每轮必须先在内部完成判断，再输出 JSON：
-1. 判断用户上一句类型：answer | confused | unknown | ask_options | revision | off_track。
-2. 只更新当前 nextSlot。
+1. 判断用户上一句类型：answer | help_me_decide | confused | unknown | ask_options | revision | off_track。
+2. 判断是否应该写入槽位：只有用户给出明确答案时，shouldUpdateSlot 才能为 true。
 3. 判断当前 nextSlot 是否 ready。
 4. 决定继续问、给选项、还是完成成稿。
 
@@ -127,10 +127,12 @@ ready:
 - 每个判断的第一问必须给 2 到 3 个 suggestions，并额外允许用户自己写。
 - suggestions 最多 3 个，每个不超过 28 个中文字符，不用 A/B/C/D，不要写“以下是选项”。
 - suggestions 必须贴合用户素材，不得凭空扩展到无关方向。
-- 用户回答“不知道/没想好/随便/你来定”时，不更新 value，继续当前判断，并给 suggestions。
+- 用户回答“不知道/没想好/随便/你来定/你帮我总结/帮我想一下/你帮我定”时，不更新 value，继续当前判断，并给 suggestions。禁止把这类话写进 slots.value。
 - 用户说“没明白/什么意思/没懂”时，不更新 value，换成更直白的问题，并给 suggestions。
 - 用户要求“再给几个选项/换几个选项/还有吗”时，不更新 value，继续当前判断，并给新 suggestions，禁止重复上一组。
 - 用户自填内容模糊时，当前判断必须是 partial，继续追问或给更具体 suggestions。
+- replyType 为 help_me_decide、unknown、confused、ask_options、off_track 时，shouldUpdateSlot 必须为 false，slotUpdate 必须为空对象或 value 为空；必须保留原有 slots，不得把用户这句话写入任何 slots.value。
+- replyType 为 answer 且 shouldUpdateSlot 为 true 时，slotUpdate 只能更新当前 nextSlot，并且 slotUpdate.value 必须是提炼后的内容判断，不要原样照搬用户口语。
 - 三个判断都 ready 时，必须生成完整稿。
 - 用户提出修改要求或 session.input.revisionRequests 有内容：直接按当前要求改写完整稿，不重新追问。
 
@@ -288,6 +290,8 @@ function normalizeDirectorSlot(value: unknown, fallback: DirectorSlot, key: Dire
       : {};
   const status = normalizeSlotStatus(record.status);
   const valueText = asString(record.value, fallback.value);
+  const fallbackValue = isDirectorNonAnswer(fallback.value) ? "" : fallback.value;
+  const safeValueText = isDirectorNonAnswer(valueText) ? fallbackValue : valueText;
   const missing = normalizeStringArray(record.missing, fallback.missing);
   const evidence = normalizeStringArray(record.evidence, fallback.evidence);
   const confidence =
@@ -296,19 +300,19 @@ function normalizeDirectorSlot(value: unknown, fallback: DirectorSlot, key: Dire
       : fallback.confidence;
   const guardedStatus = guardSlotStatus({
     status,
-    value: valueText,
+    value: safeValueText,
     confidence,
     missing,
     evidence
   });
   const promotedStatus =
-    guardedStatus === "partial" && isSlotAnswerReady(key, valueText, valueText)
+    guardedStatus === "partial" && isSlotAnswerReady(key, safeValueText, safeValueText)
       ? "ready"
       : guardedStatus;
 
   return {
     status: promotedStatus,
-    value: valueText,
+    value: safeValueText,
     confidence,
     missing: promotedStatus === "ready" ? [] : missing.length ? missing : defaultMissingForSlot(key),
     evidence
@@ -353,6 +357,94 @@ function defaultMissingForSlot(key: DirectorSlotKey) {
 function normalizeDirectorSlotKey(value: unknown, slots: DirectorSlots): DirectorSlotKey | null {
   void value;
   return firstOpenDirectorSlot(slots);
+}
+
+function normalizeDirectorReplyType(value: unknown) {
+  return value === "answer" ||
+    value === "help_me_decide" ||
+    value === "confused" ||
+    value === "unknown" ||
+    value === "ask_options" ||
+    value === "revision" ||
+    value === "off_track"
+    ? value
+    : "";
+}
+
+function shouldKeepPreviousDirectorSlots(params: {
+  replyType: string;
+  shouldUpdateSlot: unknown;
+}) {
+  if (params.shouldUpdateSlot === false) {
+    return true;
+  }
+
+  return params.replyType === "help_me_decide" ||
+    params.replyType === "unknown" ||
+    params.replyType === "confused" ||
+    params.replyType === "ask_options" ||
+    params.replyType === "off_track";
+}
+
+function normalizeSlotUpdate(value: unknown) {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const slotKey = record.slotKey;
+  const normalizedSlotKey: DirectorSlotKey | null =
+    slotKey === "rootProblem" || slotKey === "changeTarget" || slotKey === "corePromise"
+      ? slotKey
+      : null;
+  const text = asString(record.value);
+
+  if (
+    !text ||
+    isDirectorNonAnswer(text) ||
+    !normalizedSlotKey
+  ) {
+    return null;
+  }
+
+  return {
+    slotKey: normalizedSlotKey,
+    status: normalizeSlotStatus(record.status),
+    value: text,
+    confidence: typeof record.confidence === "number" ? Math.max(0, Math.min(1, record.confidence)) : 0.6,
+    missing: normalizeStringArray(record.missing, defaultMissingForSlot(normalizedSlotKey)),
+    evidence: normalizeStringArray(record.evidence)
+  };
+}
+
+function applyDirectorSlotUpdate(slots: DirectorSlots, update: NonNullable<ReturnType<typeof normalizeSlotUpdate>>) {
+  const nextSlots = normalizeDirectorSlots(slots);
+  const updateIndex = DIRECTOR_SLOT_KEYS.indexOf(update.slotKey);
+  const ready =
+    update.status === "ready" && isSlotAnswerReady(update.slotKey, update.value, update.value);
+
+  DIRECTOR_SLOT_KEYS.forEach((key, index) => {
+    if (index < updateIndex) {
+      return;
+    }
+
+    if (key === update.slotKey) {
+      nextSlots[key] = {
+        status: ready ? "ready" : update.value ? "partial" : "empty",
+        value: update.value,
+        confidence: ready ? Math.max(update.confidence, 0.72) : update.confidence,
+        missing: ready ? [] : update.missing.length ? update.missing : defaultMissingForSlot(key),
+        evidence: update.evidence.length ? update.evidence : [update.value]
+      };
+      return;
+    }
+
+    nextSlots[key] = {
+      ...EMPTY_DIRECTOR_SLOTS[key],
+      missing: defaultMissingForSlot(key)
+    };
+  });
+
+  return enforceDirectorLinearity(nextSlots);
 }
 
 function firstOpenDirectorSlot(slots: DirectorSlots): DirectorSlotKey | null {
@@ -595,7 +687,7 @@ function applyFallbackAnswers(
 }
 
 function classifyDirectorReply(answer: string) {
-  if (/^(不知道|不清楚|没想好|随便|你来定|没有|无)$/i.test(answer)) {
+  if (isDirectorNonAnswer(answer)) {
     return "unknown";
   }
 
@@ -612,6 +704,19 @@ function classifyDirectorReply(answer: string) {
   }
 
   return "answer";
+}
+
+function isDirectorNonAnswer(value: string) {
+  const normalized = value.replace(/\s/g, "");
+
+  if (!normalized) {
+    return true;
+  }
+
+  return (
+    /^(不知道|不清楚|没想好|随便|你来定|没有|无)$/i.test(normalized) ||
+    /(我也不知道|不知道.*(帮我|你帮|总结|想|定)|不清楚.*(帮我|你帮|总结|想|定)|没想好.*(帮我|你帮|总结|想|定)|帮我总结|帮我想|帮我定|你帮我总结|你帮我想|你帮我定|你来总结|你来想|你来定)/.test(normalized)
+  );
 }
 
 function canonicalizeSlotValue(slot: DirectorSlotKey, answer: string, previous = "") {
@@ -1059,15 +1164,39 @@ function buildProfileFallback(session: AgentSession, profile: CreatorProfile): A
   };
 }
 
-export function normalizeRunResult(value: Record<string, unknown>, fallback: AgentRunResult): AgentRunResult {
+export function normalizeRunResult(
+  value: Record<string, unknown>,
+  fallback: AgentRunResult,
+  context: { session?: AgentSession } = {}
+): AgentRunResult {
   const fallbackSlots = fallback.slots ?? normalizeDirectorSlots(fallback.draft.directorSlots);
   const rawDraft =
     typeof value.draft === "object" && value.draft
       ? (value.draft as Record<string, unknown>)
       : {};
-  const hasDirectorSlots = Boolean(value.slots || rawDraft.directorSlots || fallback.slots || fallback.draft.directorSlots);
+  const replyType = normalizeDirectorReplyType(value.replyType);
+  const previousSlots =
+    context.session?.module === "director" ? getDirectorSlots(context.session) : fallbackSlots;
+  const keepPreviousSlots = shouldKeepPreviousDirectorSlots({
+    replyType,
+    shouldUpdateSlot: value.shouldUpdateSlot
+  });
+  const slotUpdate = normalizeSlotUpdate(value.slotUpdate);
+  const slotInput = keepPreviousSlots
+    ? previousSlots
+    : value.shouldUpdateSlot === true && slotUpdate
+      ? applyDirectorSlotUpdate(previousSlots, slotUpdate)
+      : value.slots ?? rawDraft.directorSlots;
+  const hasDirectorSlots = Boolean(
+    value.slots ||
+      rawDraft.directorSlots ||
+      fallback.slots ||
+      fallback.draft.directorSlots ||
+      keepPreviousSlots ||
+      slotUpdate
+  );
   const slots = hasDirectorSlots
-    ? enforceDirectorLinearity(normalizeDirectorSlots(value.slots ?? rawDraft.directorSlots, fallbackSlots))
+    ? enforceDirectorLinearity(normalizeDirectorSlots(slotInput, fallbackSlots))
     : undefined;
   const rawNextSlot = value.nextSlot ?? rawDraft.nextSlot;
   const nextSlot = slots ? normalizeDirectorSlotKey(rawNextSlot, slots) : undefined;
