@@ -1395,7 +1395,7 @@ export function normalizeRunResult(
       : fallback.draft;
   const output =
     typeof value.output === "object" && value.output
-      ? { ...fallback.output, ...(value.output as Record<string, unknown>) }
+      ? normalizeDirectorOutput({ ...fallback.output, ...(value.output as Record<string, unknown>) }, fallback.output)
       : fallback.output;
   const status =
     value.status === "collecting" || value.status === "ready" || value.status === "completed"
@@ -1508,6 +1508,60 @@ function normalizeWritePolicy(value: unknown): WritePolicy {
   }
 
   return "candidate_only";
+}
+
+function normalizeDirectorOutput(
+  output: Record<string, unknown>,
+  fallbackOutput: Record<string, unknown>
+) {
+  const rawTimeline = Array.isArray(output.timeline) ? output.timeline : [];
+  const fallbackTimeline = Array.isArray(fallbackOutput.timeline) ? fallbackOutput.timeline : [];
+  const finalScript = asString(output.finalScript, asString(fallbackOutput.finalScript));
+  const scriptParts = finalScript
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!rawTimeline.length && !fallbackTimeline.length) {
+    return output;
+  }
+
+  return {
+    ...output,
+    timeline: (rawTimeline.length ? rawTimeline : fallbackTimeline).map((item, index) =>
+      normalizeTimelineItem(item, fallbackTimeline[index], scriptParts, index)
+    )
+  };
+}
+
+function normalizeTimelineItem(
+  item: unknown,
+  fallback: unknown,
+  scriptParts: string[],
+  index: number
+) {
+  const record = item && typeof item === "object" && !Array.isArray(item)
+    ? (item as Record<string, unknown>)
+    : {};
+  const fallbackRecord = fallback && typeof fallback === "object" && !Array.isArray(fallback)
+    ? (fallback as Record<string, unknown>)
+    : {};
+  const time = asString(record.time, asString(fallbackRecord.time, `${index + 1}`));
+  const role = asString(record.role, asString(fallbackRecord.role, "拍摄段落"));
+  const script =
+    asString(record.script) ||
+    asString(fallbackRecord.script) ||
+    scriptParts[index] ||
+    scriptParts.at(-1) ||
+    "这一段按完整口播稿对应内容拍摄。";
+  const visual = asString(record.visual, asString(fallbackRecord.visual));
+
+  return {
+    time,
+    role,
+    script,
+    ...(visual ? { visual } : {})
+  };
 }
 
 function mergeDraft(

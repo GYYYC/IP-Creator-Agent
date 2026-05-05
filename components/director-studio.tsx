@@ -47,6 +47,13 @@ type DirectorOutput = {
   publishChecklist?: string[];
 };
 
+type TimelineItem = {
+  time: string;
+  role: string;
+  script: string;
+  visual?: string;
+};
+
 type ApiSession = {
   id: string;
   status: "draft" | "collecting" | "ready" | "completed";
@@ -170,6 +177,26 @@ function uploadedMaterialText(files: File[], mode: Mode) {
   }
 
   return `${mode === "video" ? "视频素材" : "图文素材"}：${files.map((file) => file.name).join("、")}`;
+}
+
+function normalizeTimeline(items: DirectorOutput["timeline"], finalScript: string): TimelineItem[] {
+  const source = Array.isArray(items) ? items : [];
+  const scriptParts = finalScript
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return source
+    .map((item, index) => {
+      const time = typeof item.time === "string" && item.time.trim() ? item.time.trim() : `${index + 1}`;
+      const role = typeof item.role === "string" && item.role.trim() ? item.role.trim() : "拍摄段落";
+      const script = typeof item.script === "string" && item.script.trim()
+        ? item.script.trim()
+        : scriptParts[index] || scriptParts.at(-1) || "这一段按完整口播稿对应内容拍摄。";
+      const visual = typeof item.visual === "string" && item.visual.trim() ? item.visual.trim() : undefined;
+
+      return { time, role, script, visual };
+    });
 }
 
 function modePreset(mode: Mode, goal: Goal, outputSpec: OutputSpec) {
@@ -481,7 +508,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
   const finalScript = output.finalScript ?? "";
   const titleOptions = output.titleOptions ?? [];
   const publishChecklist = output.publishChecklist ?? [];
-  const timeline = output.timeline ?? [];
+  const timeline = normalizeTimeline(output.timeline, finalScript);
   const tags = output.tags ?? [];
   const wordCountPreset = WORD_COUNT_PRESETS.includes(outputSpec.wordCount)
     ? outputSpec.wordCount
@@ -978,7 +1005,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
           <div className="surface-card glass">
             <span className="label">拍摄时间轴</span>
             <h3>按这个顺序拍</h3>
-            <div className="script-timeline">
+            <div className="script-timeline director-script-timeline">
               {timeline.map((item) => (
                 <div className="script-timeline-item" key={`${item.time}-${item.role}`}>
                   <strong>{item.time} · {item.role}</strong>
@@ -1000,7 +1027,7 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
                 <p>{output.coverText}</p>
               </div>
             ) : null}
-            <div className="script-block">{finalScript}</div>
+            <div className="script-block director-script-scroll">{finalScript}</div>
             {tags.length ? (
               <div className="mode-switch">
                 {tags.map((tag) => (
