@@ -98,17 +98,23 @@ const CONTENT_MODE_CONFIG: Record<
     label: string;
     sourceType: string;
     workPlaceholder: string;
+    workUploadLabel: string;
+    workUploadHint: string;
   }
 > = {
   graphic: {
     label: "图文作品",
     sourceType: "图文作品",
-    workPlaceholder: "粘贴作品链接、标题、正文、首图文案，或从下面选一条历史作品。"
+    workPlaceholder: "粘贴作品链接、标题、正文、首图文案，或从最近复盘里选一条作品。",
+    workUploadLabel: "上传这篇作品",
+    workUploadHint: "支持首图、正文截图或 txt/md 正文文件。"
   },
   video: {
     label: "视频作品",
     sourceType: "视频作品",
-    workPlaceholder: "粘贴视频链接、标题、脚本、口播内容，或从下面选一条历史作品。"
+    workPlaceholder: "粘贴视频链接、标题、脚本、口播内容，或从最近复盘里选一条作品。",
+    workUploadLabel: "上传这条视频的内容截图",
+    workUploadHint: "支持封面、关键画面、字幕截图或 txt/md 口播稿。"
   }
 };
 
@@ -193,6 +199,29 @@ function fileNames(files: File[]) {
   return files.map((file) => file.name);
 }
 
+function mergeFileList(current: File[], nextFiles: File[]) {
+  const seen = new Set(current.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+  const merged = [...current];
+
+  for (const file of nextFiles) {
+    const key = `${file.name}-${file.size}-${file.lastModified}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(file);
+    }
+  }
+
+  return merged;
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/");
+}
+
+function isTextFile(file: File) {
+  return file.type.startsWith("text/") || /\.(txt|md|markdown)$/i.test(file.name);
+}
+
 function asText(value: unknown) {
   if (typeof value === "string") {
     return value;
@@ -264,6 +293,47 @@ async function imageFileToDataUrl(file: File) {
   }
 }
 
+async function workFileToArtifactPayload(file: File, mode: ContentMode) {
+  const base = {
+    kind: mode === "graphic" ? "graphic_post" : "image",
+    mimeType: file.type || "application/octet-stream",
+    fileName: file.name,
+    sizeBytes: file.size
+  };
+
+  if (isImageFile(file)) {
+    return {
+      ...base,
+      extractedJson: {
+        visualDataUrl: await imageFileToDataUrl(file),
+        visualRole: "work_content",
+        sourceFileName: file.name
+      }
+    };
+  }
+
+  if (isTextFile(file)) {
+    return {
+      ...base,
+      kind: "text",
+      mimeType: file.type || "text/plain",
+      extractedText: await file.text(),
+      extractedJson: {
+        visualRole: "work_content",
+        sourceFileName: file.name
+      }
+    };
+  }
+
+  return {
+    ...base,
+    extractedJson: {
+      visualRole: "work_content",
+      sourceFileName: file.name
+    }
+  };
+}
+
 function normalizeTaskMode(value: unknown): AssistantTaskMode {
   return value === "comment_direction" ? "comment_direction" : "single_comment";
 }
@@ -299,6 +369,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   const [taskMode, setTaskMode] = useState<AssistantTaskMode>("single_comment");
   const [workContext, setWorkContext] = useState("");
   const [selectedWorkId, setSelectedWorkId] = useState("");
+  const [workFiles, setWorkFiles] = useState<File[]>([]);
   const [comments, setComments] = useState("");
   const [commentFiles, setCommentFiles] = useState<File[]>([]);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
@@ -308,14 +379,14 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   const contentConfig = CONTENT_MODE_CONFIG[mode];
   const taskConfig = TASK_CONFIG[taskMode];
   const output = session?.output ?? fallbackOutput;
-  const hasWork = Boolean(workContext.trim());
+  const hasWork = Boolean(workContext.trim() || workFiles.length > 0);
   const hasMaterial = Boolean(comments.trim() || commentFiles.length > 0);
   const canAnalyze = hasWork && hasMaterial;
   const workOptions = useMemo(
     () =>
       historyEntries
-        .filter((entry) => entry.module === "director" || entry.module === "doctor")
-        .slice(0, 4),
+        .filter((entry) => entry.module === "doctor")
+        .slice(0, 6),
     [historyEntries]
   );
   const rows = analysisRows(output, output.assistantMode ?? taskMode);
@@ -367,6 +438,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
         setTaskMode(normalizeTaskMode(input.assistantMode));
         setWorkContext(typeof input.workContext === "string" ? input.workContext : "");
         setSelectedWorkId(typeof input.selectedWorkId === "string" ? input.selectedWorkId : "");
+        setWorkFiles([]);
         setComments(typeof input.comments === "string" ? input.comments : "");
         setCommentFiles([]);
         setSession(loadedSession);
@@ -391,20 +463,17 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const nextFiles = Array.from(event.target.files ?? []);
 
-    setCommentFiles((current) => {
-      const seen = new Set(current.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
-      const merged = [...current];
+    setCommentFiles((current) => mergeFileList(current, nextFiles));
+    setSession(null);
+    setMessage("");
+    event.target.value = "";
+  }
 
-      for (const file of nextFiles) {
-        const key = `${file.name}-${file.size}-${file.lastModified}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          merged.push(file);
-        }
-      }
+  function handleWorkFiles(event: ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(event.target.files ?? []);
 
-      return merged;
-    });
+    setWorkFiles((current) => mergeFileList(current, nextFiles));
+    setSelectedWorkId("");
     setSession(null);
     setMessage("");
     event.target.value = "";
@@ -433,6 +502,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   function selectWork(entry: HistoryEntry) {
     setSelectedWorkId(entry.id);
     setWorkContext(workTextFromEntry(entry));
+    setWorkFiles([]);
     setSession(null);
     setMessage("");
   }
@@ -457,7 +527,12 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
     setLoading(true);
     setMessage("");
     try {
-      const artifacts = await Promise.all(
+      const workArtifacts = await Promise.all(
+        workFiles.map(async (file) =>
+          postJson<ArtifactResponse>("/api/artifacts/register", await workFileToArtifactPayload(file, mode))
+        )
+      );
+      const commentArtifacts = await Promise.all(
         commentFiles.map(async (file) => {
           const visualDataUrl = await imageFileToDataUrl(file);
 
@@ -474,6 +549,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
           });
         })
       );
+      const artifacts = [...commentArtifacts, ...workArtifacts];
       const created = await postJson<{ session: ApiSession }>("/api/sessions", {
         module: "assistant",
         contentMode: mode,
@@ -484,6 +560,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
           selectedWorkId,
           comments,
           sourceType: contentConfig.sourceType,
+          workFileNames: fileNames(workFiles),
           screenshotFileNames: fileNames(commentFiles)
         }
       });
@@ -546,12 +623,12 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
                 <label htmlFor="assistant-work">作品内容、链接或脚本</label>
                 {workOptions.length ? (
                   <select
-                    aria-label="使用最近作品"
+                    aria-label="使用最近复盘作品"
                     className="recent-work-select"
                     onChange={(event) => handleRecentWorkChange(event.target.value)}
                     value={selectedWorkId}
                   >
-                    <option value="">使用最近作品</option>
+                    <option value="">使用最近复盘作品</option>
                     {workOptions.map((entry) => (
                       <option key={entry.id} value={entry.id}>
                         {entry.title}
@@ -572,6 +649,35 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
                 value={workContext}
               />
             </div>
+            <label className="upload-card profile-upload-card">
+              <strong>{contentConfig.workUploadLabel}</strong>
+              <span>{contentConfig.workUploadHint}</span>
+              <input
+                accept="image/*,.txt,.md,.markdown"
+                className="file-input"
+                multiple
+                onChange={handleWorkFiles}
+                type="file"
+              />
+            </label>
+            <div className="selected-files">
+              {fileNames(workFiles).map((name) => (
+                <span key={name}>{name}</span>
+              ))}
+            </div>
+            {workFiles.length ? (
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  setWorkFiles([]);
+                  setSession(null);
+                  setMessage("");
+                }}
+                type="button"
+              >
+                清空作品素材
+              </button>
+            ) : null}
           </div>
 
           <div className="assistant-step-block">
