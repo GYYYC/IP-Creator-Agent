@@ -369,6 +369,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
   const [taskMode, setTaskMode] = useState<AssistantTaskMode>("single_comment");
   const [workContext, setWorkContext] = useState("");
   const [selectedWorkId, setSelectedWorkId] = useState("");
+  const [workPickerOpen, setWorkPickerOpen] = useState(false);
   const [workFiles, setWorkFiles] = useState<File[]>([]);
   const [comments, setComments] = useState("");
   const [commentFiles, setCommentFiles] = useState<File[]>([]);
@@ -389,6 +390,7 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
         .slice(0, 6),
     [historyEntries]
   );
+  const selectedWork = workOptions.find((entry) => entry.id === selectedWorkId);
   const rows = analysisRows(output, output.assistantMode ?? taskMode);
 
   useEffect(() => {
@@ -513,12 +515,14 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
       setWorkContext("");
       setSession(null);
       setMessage("");
+      setWorkPickerOpen(false);
       return;
     }
 
     const entry = workOptions.find((item) => item.id === value);
     if (entry) {
       selectWork(entry);
+      setWorkPickerOpen(false);
     }
   }
 
@@ -623,24 +627,47 @@ export function AssistantStudio({ initialSessionId }: { initialSessionId?: strin
             </div>
             <div className="input-group">
               <div className="assistant-field-head">
-                <label htmlFor="assistant-work-select">作品来源</label>
-                <select
-                  id="assistant-work-select"
-                  aria-label="使用最近复盘作品"
-                  className="recent-work-select"
-                  disabled={!workOptions.length}
-                  onChange={(event) => handleRecentWorkChange(event.target.value)}
-                  value={selectedWorkId}
-                >
-                  <option value="">
-                    {workOptions.length ? "使用最近复盘作品" : "暂无复盘作品"}
-                  </option>
-                  {workOptions.map((entry) => (
-                    <option key={entry.id} value={entry.id}>
-                      {entry.title}
-                    </option>
-                  ))}
-                </select>
+                <label id="assistant-work-picker-label">作品来源</label>
+                <div className="recent-work-picker">
+                  <button
+                    aria-expanded={workPickerOpen}
+                    aria-labelledby="assistant-work-picker-label"
+                    className="recent-work-trigger"
+                    disabled={!workOptions.length}
+                    onClick={() => setWorkPickerOpen((value) => !value)}
+                    type="button"
+                  >
+                    <span>{selectedWork?.title || (workOptions.length ? "使用最近复盘作品" : "暂无复盘作品")}</span>
+                    <b aria-hidden="true">⌄</b>
+                  </button>
+                  {workPickerOpen ? (
+                    <div className="recent-work-menu" role="listbox">
+                      {selectedWorkId ? (
+                        <button
+                          className="recent-work-option muted-option"
+                          onClick={() => handleRecentWorkChange("")}
+                          role="option"
+                          type="button"
+                        >
+                          不使用历史作品
+                        </button>
+                      ) : null}
+                      {workOptions.map((entry) => (
+                        <button
+                          aria-selected={entry.id === selectedWorkId}
+                          className="recent-work-option"
+                          key={entry.id}
+                          onClick={() => handleRecentWorkChange(entry.id)}
+                          role="option"
+                          type="button"
+                        >
+                          <strong>{entry.title}</strong>
+                          <span>{entry.summary}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
             <label className="upload-card profile-upload-card">
