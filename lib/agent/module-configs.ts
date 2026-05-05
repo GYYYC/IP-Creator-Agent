@@ -127,11 +127,12 @@ ready:
 - 每个判断的第一问必须给 2 到 3 个 suggestions，并额外允许用户自己写。
 - suggestions 最多 3 个，每个不超过 28 个中文字符，不用 A/B/C/D，不要写“以下是选项”。
 - suggestions 必须贴合用户素材，不得凭空扩展到无关方向。
-- 用户回答“不知道/没想好/随便/你来定/你帮我总结/帮我想一下/你帮我定”时，不更新 value，继续当前判断，并给 suggestions。禁止把这类话写进 slots.value。
+- 用户回答“不知道/没想好/随便/你来定/你帮我总结/帮我想一下/你帮我定/你有什么建议/你觉得呢/帮我选一个/给我一个建议”时，replyType 必须是 help_me_decide，不更新 value，必须主动给一个推荐答案和 suggestions。禁止把这类话写进 slots.value。
 - 用户说“没明白/什么意思/没懂”时，不更新 value，换成更直白的问题，并给 suggestions。
 - 用户要求“再给几个选项/换几个选项/还有吗”时，不更新 value，继续当前判断，并给新 suggestions，禁止重复上一组。
 - 用户自填内容模糊时，当前判断必须是 partial，继续追问或给更具体 suggestions。
 - replyType 为 help_me_decide、unknown、confused、ask_options、off_track 时，shouldUpdateSlot 必须为 false，slotUpdate 必须为空对象或 value 为空；必须保留原有 slots，不得把用户这句话写入任何 slots.value。
+- replyType 为 help_me_decide 时，assistantMessage 必须写“我建议...”并给出一个可直接采用的答案；nextQuestion 只能问确认或偏好，例如“用这一句，还是想更狠/更温和一点？”；禁止只反问用户。
 - replyType 为 answer 且 shouldUpdateSlot 为 true 时，slotUpdate 只能更新当前 nextSlot，并且 slotUpdate.value 必须是提炼后的内容判断，不要原样照搬用户口语。
 - 三个判断都 ready 时，必须生成完整稿。
 - 用户提出修改要求或 session.input.revisionRequests 有内容：直接按当前要求改写完整稿，不重新追问。
@@ -430,6 +431,7 @@ function normalizeSlotUpdate(value: unknown) {
 
   if (
     !text ||
+    isDirectorHelpMeDecide(text) ||
     isDirectorNonAnswer(text) ||
     !normalizedSlotKey
   ) {
@@ -535,12 +537,20 @@ function buildDirectorFallback(session: AgentSession, profile: CreatorProfile): 
   );
   const nextSlot = normalizeDirectorSlotKey(session.draft.nextSlot, slots);
   const optionVariant = session.answers.filter((answer) =>
-    ["unknown", "confused", "ask_options"].includes(classifyDirectorReply(answer))
+    ["help_me_decide", "unknown", "confused", "ask_options"].includes(classifyDirectorReply(answer))
   ).length;
+  const latestReplyType = classifyDirectorReply(session.answers.at(-1) ?? "");
+  const wantsHelp = latestReplyType === "help_me_decide";
   const suggestions = nextSlot && slots[nextSlot].status !== "ready"
-    ? fallbackSuggestions(nextSlot, idea, mode, optionVariant, profileContext)
+    ? wantsHelp
+      ? fallbackHelpSuggestions(nextSlot, slots, mode, optionVariant, profileContext)
+      : fallbackSuggestions(nextSlot, idea, mode, optionVariant, profileContext)
     : [];
-  const nextQuestion = nextSlot ? fallbackQuestion(nextSlot, slots[nextSlot].status, idea, mode) : undefined;
+  const nextQuestion = nextSlot
+    ? wantsHelp
+      ? fallbackHelpQuestion(nextSlot)
+      : fallbackQuestion(nextSlot, slots[nextSlot].status, idea, mode)
+    : undefined;
   const complete =
     revisionRequests.length > 0 ||
     directorAllReady(slots);
@@ -604,7 +614,9 @@ function buildDirectorFallback(session: AgentSession, profile: CreatorProfile): 
       ? revisionRequests.length
         ? "按新的要求更新这一版。"
         : "检查标题、开头和结尾引导。"
-      : "选一个方向，或自己写。",
+      : wantsHelp && nextSlot
+        ? fallbackHelpAssistantMessage(nextSlot, suggestions, slots)
+        : "选一个方向，或自己写。",
     nextQuestion: complete ? undefined : nextQuestion,
     nextSlot: complete ? null : nextSlot,
     suggestions: complete ? [] : suggestions,
@@ -690,7 +702,7 @@ function applyFallbackAnswers(
     const normalizedAnswer = answer.trim();
     const replyType = classifyDirectorReply(normalizedAnswer);
 
-    if (replyType === "unknown" || replyType === "confused" || replyType === "ask_options") {
+    if (replyType === "help_me_decide" || replyType === "unknown" || replyType === "confused" || replyType === "ask_options") {
       nextSlots[currentSlot] = {
         ...nextSlots[currentSlot],
         status: nextSlots[currentSlot].value ? "partial" : "empty",
@@ -721,8 +733,8 @@ function applyFallbackAnswers(
 }
 
 function classifyDirectorReply(answer: string) {
-  if (isDirectorNonAnswer(answer)) {
-    return "unknown";
+  if (isDirectorHelpMeDecide(answer)) {
+    return "help_me_decide";
   }
 
   if (/(没明白|没懂|什么意思|啥意思|不理解|看不懂)/.test(answer)) {
@@ -737,7 +749,24 @@ function classifyDirectorReply(answer: string) {
     return "revision";
   }
 
+  if (isDirectorNonAnswer(answer)) {
+    return "unknown";
+  }
+
   return "answer";
+}
+
+function isDirectorHelpMeDecide(value: string) {
+  const normalized = value.replace(/\s/g, "");
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /^(不知道|不清楚|没想好|随便|你来定)$/i.test(normalized) ||
+    /(我也不知道|不知道.*(帮我|你帮|总结|想|定|选|建议)|不清楚.*(帮我|你帮|总结|想|定|选|建议)|没想好.*(帮我|你帮|总结|想|定|选|建议)|帮我总结|帮我想|帮我定|帮我选|你帮我总结|你帮我想|你帮我定|你帮我选|你来总结|你来想|你来定|你来选|你有什么建议|有什么建议|给我.*建议|给个建议|你觉得呢|你认为呢|你看呢|帮我拿主意|帮我决定)/.test(normalized)
+  );
 }
 
 function isDirectorNonAnswer(value: string) {
@@ -748,8 +777,7 @@ function isDirectorNonAnswer(value: string) {
   }
 
   return (
-    /^(不知道|不清楚|没想好|随便|你来定|没有|无)$/i.test(normalized) ||
-    /(我也不知道|不知道.*(帮我|你帮|总结|想|定)|不清楚.*(帮我|你帮|总结|想|定)|没想好.*(帮我|你帮|总结|想|定)|帮我总结|帮我想|帮我定|你帮我总结|你帮我想|你帮我定|你来总结|你来想|你来定)/.test(normalized)
+    /^(不知道|不清楚|没想好|随便|没有|无)$/i.test(normalized)
   );
 }
 
@@ -882,6 +910,90 @@ function fallbackSuggestions(
     ["先降低风险，再开始", "别只看结果，先看路径", "做得到，才有意义"]
   ];
   return groups[variant % groups.length];
+}
+
+function fallbackHelpSuggestions(
+  slot: DirectorSlotKey,
+  slots: DirectorSlots,
+  mode: ContentMode,
+  variant = 0,
+  profileContext: DirectorProfileContext
+) {
+  if (slot !== "corePromise") {
+    return fallbackSuggestions(slot, "", mode, variant, profileContext);
+  }
+
+  const rootProblem = slots.rootProblem.value || profileContext.audience;
+  const changeTarget = slots.changeTarget.value || "先找到一个现在就能执行的小动作";
+  const context = `${rootProblem}${changeTarget}`;
+
+  if (/(减肥|瘦|吃|食欲|暴食|进食|管住嘴|体重)/.test(context)) {
+    return [
+      "别靠硬扛，先看见失控点",
+      "反复失控不是失败，是方法没对准",
+      "先处理触发点，才可能稳定瘦"
+    ];
+  }
+
+  if (/(焦虑|内耗|害怕|担心|不敢|压力)/.test(context)) {
+    return [
+      "先降低风险，再开始行动",
+      "不是你不行，是第一步太大",
+      "稳住第一步，才有后面的改变"
+    ];
+  }
+
+  return [
+    "别只靠硬扛，先找到真正卡点",
+    "先做对一小步，再追求结果",
+    "做得到，才真的有意义"
+  ];
+}
+
+function fallbackHelpAssistantMessage(
+  slot: DirectorSlotKey,
+  suggestions: string[],
+  slots: DirectorSlots
+) {
+  const first = suggestions[0] || fallbackHelpSuggestions(slot, slots, "video", 0, {
+    role: "内容创作者",
+    proof: "有真实经历和可执行方法",
+    audience: "正在被这个问题困住的人",
+    tone: "清楚、可信、能给具体方法",
+    topic: "一个具体问题",
+    tags: ["真实经验", "具体方法", "可执行"]
+  })[0];
+
+  if (slot === "rootProblem") {
+    return `我建议先定成：${first}。这个人群有明确处境，开头更容易抓住人。`;
+  }
+
+  if (slot === "changeTarget") {
+    return `我建议先定成：${first}。它比泛泛讲道理更像看完后的具体变化。`;
+  }
+
+  return `我建议结尾收成这一句：${first}。它能把前面的判断收住，也方便放进标题或结尾。`;
+}
+
+function fallbackHelpQuestion(slot: DirectorSlotKey) {
+  if (slot === "rootProblem") {
+    return "用这个人群，还是想换得更具体一点？";
+  }
+
+  if (slot === "changeTarget") {
+    return "用这个动作，还是想换得更直接一点？";
+  }
+
+  return "用这一句，还是想更狠/更温和一点？";
+}
+
+function isWeakHelpAssistantMessage(message: string) {
+  const normalized = message.replace(/\s/g, "");
+
+  return (
+    !normalized ||
+    (/^(最后|这条内容|你更想|你想|把这句话)/.test(normalized) && !/(我建议|建议先|推荐|可以用|先用)/.test(normalized))
+  );
 }
 
 function normalizeOutputSpec(value: unknown, mode: ContentMode) {
@@ -1233,7 +1345,10 @@ export function normalizeRunResult(
     typeof value.draft === "object" && value.draft
       ? (value.draft as Record<string, unknown>)
       : {};
-  const replyType = normalizeDirectorReplyType(value.replyType);
+  const modelReplyType = normalizeDirectorReplyType(value.replyType);
+  const latestLocalReplyType =
+    context.session?.module === "director" ? classifyDirectorReply(context.session.answers.at(-1) ?? "") : "";
+  const replyType = latestLocalReplyType === "help_me_decide" ? "help_me_decide" : modelReplyType;
   const previousSlots =
     context.session?.module === "director" ? getDirectorSlots(context.session) : fallbackSlots;
   const keepPreviousSlots = shouldKeepPreviousDirectorSlots({
@@ -1264,7 +1379,13 @@ export function normalizeRunResult(
     rawNextSlot === nextSlot || (!rawNextSlot && nextSlot === fallback.nextSlot);
   const suggestions =
     nextSlot && slots?.[nextSlot]?.status !== "ready"
-      ? rawNextSlotMatches && rawSuggestions.length
+      ? replyType === "help_me_decide"
+        ? rawSuggestions.length
+          ? rawSuggestions
+          : normalizeSuggestions(fallback.suggestions).length
+            ? normalizeSuggestions(fallback.suggestions)
+            : fallbackSuggestions(nextSlot, "", "video")
+        : rawNextSlotMatches && rawSuggestions.length
         ? rawSuggestions
         : fallbackSuggestions(nextSlot, "", "video")
       : [];
@@ -1284,10 +1405,16 @@ export function normalizeRunResult(
     slots && status === "completed" && !directorAllReady(slots)
       ? "collecting"
       : status;
-  const assistantMessage = asString(value.assistantMessage, fallback.assistantMessage);
+  const rawAssistantMessage = asString(value.assistantMessage, fallback.assistantMessage);
+  const assistantMessage =
+    replyType === "help_me_decide" && isWeakHelpAssistantMessage(rawAssistantMessage)
+      ? fallback.assistantMessage
+      : rawAssistantMessage;
   const nextQuestion =
     guardedStatus === "collecting" && nextSlot
-      ? rawNextSlotMatches
+      ? replyType === "help_me_decide" && fallback.nextQuestion
+        ? fallback.nextQuestion
+        : rawNextSlotMatches
         ? asString(value.nextQuestion, linearFallbackQuestion(nextSlot, slots?.[nextSlot]?.status ?? "empty"))
         : linearFallbackQuestion(nextSlot, slots?.[nextSlot]?.status ?? "empty")
       : undefined;

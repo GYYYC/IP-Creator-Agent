@@ -426,11 +426,26 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     const items: ThreadMessage[] = [];
     const questions = session?.askedQuestions.length ? session.askedQuestions : [];
 
-    if (savedAssistantMessage && !questions.includes(savedAssistantMessage)) {
+    const shouldAppendAssistantMessage = /我建议|建议先|推荐|可以用/.test(savedAssistantMessage);
+
+    if (savedAssistantMessage && !shouldAppendAssistantMessage && !questions.includes(savedAssistantMessage)) {
       items.push({ role: "assistant", text: savedAssistantMessage });
     }
 
+    let appendedAssistantMessage = false;
+
     questions.forEach((question, index) => {
+      if (
+        savedAssistantMessage &&
+        shouldAppendAssistantMessage &&
+        !questions.includes(savedAssistantMessage) &&
+        index === questions.length - 1 &&
+        !sessionAnswers[index]
+      ) {
+        items.push({ role: "assistant", text: savedAssistantMessage });
+        appendedAssistantMessage = true;
+      }
+
       if (index === 0 || sessionAnswers[index - 1]) {
         items.push({ role: "assistant", text: question });
       }
@@ -443,6 +458,15 @@ export function DirectorStudio({ initialSessionId }: { initialSessionId?: string
     revisionRequests.forEach((request) => {
       items.push({ role: "user", text: request });
     });
+
+    if (
+      savedAssistantMessage &&
+      shouldAppendAssistantMessage &&
+      !appendedAssistantMessage &&
+      !questions.includes(savedAssistantMessage)
+    ) {
+      items.push({ role: "assistant", text: savedAssistantMessage });
+    }
 
     return [...items, ...sideMessages];
   }, [revisionRequests, savedAssistantMessage, session?.askedQuestions, sessionAnswers, sideMessages, started]);
