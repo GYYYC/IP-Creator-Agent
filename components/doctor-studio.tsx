@@ -1813,12 +1813,6 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
                   <p>{output.assistantMessage}</p>
                 </div>
               ) : null}
-              {output.evidence ? (
-                <div className="callout">
-                  <strong>判断依据</strong>
-                  <p>{output.evidence}</p>
-                </div>
-              ) : null}
               <div className="action-bullets">
                 {(output.actions ?? []).map((item) => (
                   <div className="bullet-row" key={item}>
