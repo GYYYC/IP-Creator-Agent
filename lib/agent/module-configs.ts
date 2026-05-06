@@ -1,4 +1,5 @@
 import {
+  AgentModule,
   AgentRunResult,
   AgentSession,
   ContentMode,
@@ -1393,10 +1394,11 @@ export function normalizeRunResult(
     typeof value.draft === "object" && value.draft
       ? mergeDraft(rawDraft, fallback.draft)
       : fallback.draft;
-  const output =
+  const mergedOutput =
     typeof value.output === "object" && value.output
-      ? normalizeDirectorOutput({ ...fallback.output, ...(value.output as Record<string, unknown>) }, fallback.output)
+      ? { ...fallback.output, ...(value.output as Record<string, unknown>) }
       : fallback.output;
+  const output = normalizeOutputForModule(mergedOutput, fallback.output, context.session?.module);
   const status =
     value.status === "collecting" || value.status === "ready" || value.status === "completed"
       ? value.status
@@ -1510,6 +1512,22 @@ function normalizeWritePolicy(value: unknown): WritePolicy {
   return "candidate_only";
 }
 
+function normalizeOutputForModule(
+  output: Record<string, unknown>,
+  fallbackOutput: Record<string, unknown>,
+  module?: AgentModule
+) {
+  if (module === "director") {
+    return normalizeDirectorOutput(output, fallbackOutput);
+  }
+
+  if (module === "doctor") {
+    return normalizeDoctorOutput(output, fallbackOutput);
+  }
+
+  return output;
+}
+
 function normalizeDirectorOutput(
   output: Record<string, unknown>,
   fallbackOutput: Record<string, unknown>
@@ -1531,6 +1549,66 @@ function normalizeDirectorOutput(
     timeline: (rawTimeline.length ? rawTimeline : fallbackTimeline).map((item, index) =>
       normalizeTimelineItem(item, fallbackTimeline[index], scriptParts, index)
     )
+  };
+}
+
+function normalizeDoctorOutput(
+  output: Record<string, unknown>,
+  fallbackOutput: Record<string, unknown>
+) {
+  const rawTimeline = Array.isArray(output.timeline) ? output.timeline : [];
+  const fallbackTimeline = Array.isArray(fallbackOutput.timeline) ? fallbackOutput.timeline : [];
+  const evidence = asString(output.evidence, asString(fallbackOutput.evidence));
+  const evidenceParts = evidence
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!rawTimeline.length && !fallbackTimeline.length) {
+    return output;
+  }
+
+  return {
+    ...output,
+    timeline: (rawTimeline.length ? rawTimeline : fallbackTimeline).map((item, index) =>
+      normalizeDoctorTimelineItem(item, fallbackTimeline[index], evidenceParts, index)
+    )
+  };
+}
+
+function normalizeDoctorTimelineItem(
+  item: unknown,
+  fallback: unknown,
+  evidenceParts: string[],
+  index: number
+) {
+  const record = item && typeof item === "object" && !Array.isArray(item)
+    ? (item as Record<string, unknown>)
+    : {};
+  const fallbackRecord = fallback && typeof fallback === "object" && !Array.isArray(fallback)
+    ? (fallback as Record<string, unknown>)
+    : {};
+  const label = asString(
+    record.label,
+    asString(record.time, asString(fallbackRecord.label, asString(fallbackRecord.time, `第 ${index + 1} 个掉点`)))
+  );
+  const title = asString(
+    record.title,
+    asString(record.role, asString(fallbackRecord.title, asString(fallbackRecord.role, "这一段需要重点复盘")))
+  );
+  const description =
+    asString(record.description) ||
+    asString(record.script) ||
+    asString(fallbackRecord.description) ||
+    asString(fallbackRecord.script) ||
+    evidenceParts[index] ||
+    evidenceParts.at(-1) ||
+    "结合这一段检查信息密度、信任感和观众继续看下去的理由。";
+
+  return {
+    label,
+    title,
+    description
   };
 }
 

@@ -10,7 +10,7 @@ type DoctorOutput = {
   assistantMessage?: string;
   mainIssue?: string;
   evidence?: string;
-  timeline?: Array<{ label: string; title: string; description: string }>;
+  timeline?: Array<{ label?: string; title?: string; description?: string; time?: string; role?: string; script?: string }>;
   actions?: string[];
   rewrittenScript?: {
     title?: string;
@@ -571,6 +571,33 @@ function getScriptBody(output: DoctorOutput) {
   return typeof output.rewrittenScript?.body === "string"
     ? output.rewrittenScript.body.trim()
     : "";
+}
+
+function normalizeDoctorTimeline(
+  items: DoctorOutput["timeline"],
+  fallbackText?: string
+): Array<{ label: string; title: string; description: string }> {
+  const fallbackParts = typeof fallbackText === "string"
+    ? fallbackText
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+  return (items ?? [])
+    .map((item, index) => {
+      const label = item.label?.trim() || item.time?.trim() || `第 ${index + 1} 个掉点`;
+      const title = item.title?.trim() || item.role?.trim() || "这一段需要重点复盘";
+      const description =
+        item.description?.trim() ||
+        item.script?.trim() ||
+        fallbackParts[index] ||
+        fallbackParts.at(-1) ||
+        "结合这一段检查信息密度、信任感和观众继续看下去的理由。";
+
+      return { label, title, description };
+    })
+    .filter((item) => item.label || item.title || item.description);
 }
 
 async function fileToVisualDataUrl(file: File) {
@@ -1169,7 +1196,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       : fallbackOutput;
   const scriptBody = getScriptBody(output);
   const transcripts = getSessionTranscripts(session);
-  const timelineItems = output.timeline ?? [];
+  const timelineItems = normalizeDoctorTimeline(output.timeline, output.evidence || output.mainIssue);
   const hasTranscriptEvidence = transcripts.length > 0;
   const hasTimelineEvidence = timelineItems.length > 0;
   const hasEvidence = hasTimelineEvidence;

@@ -1915,6 +1915,22 @@ svg {
   padding-left: 20px;
 }
 
+.doctor-evidence-timeline .timeline-item {
+  display: grid;
+  gap: 6px;
+  min-height: 76px;
+}
+
+.doctor-evidence-timeline .timeline-item div {
+  color: var(--text-strong);
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.doctor-evidence-timeline .timeline-item p {
+  color: var(--text-muted);
+}
+
 .timeline-item::before {
   content: "";
   position: absolute;
