@@ -575,7 +575,8 @@ function getScriptBody(output: DoctorOutput) {
 
 function normalizeDoctorTimeline(
   items: DoctorOutput["timeline"],
-  fallbackText?: string
+  fallbackText?: string,
+  transcripts: VideoTranscript[] = []
 ): Array<{ label: string; title: string; description: string }> {
   const fallbackParts = typeof fallbackText === "string"
     ? fallbackText
@@ -584,8 +585,12 @@ function normalizeDoctorTimeline(
         .filter(Boolean)
     : [];
 
-  return (items ?? [])
+  const normalized = (items ?? [])
     .map((item, index) => {
+      if (isPlaceholderDoctorTimelineItem(item)) {
+        return null;
+      }
+
       const label = item.label?.trim() || item.time?.trim() || `第 ${index + 1} 个掉点`;
       const title = item.title?.trim() || item.role?.trim() || "这一段需要重点复盘";
       const description =
@@ -597,7 +602,110 @@ function normalizeDoctorTimeline(
 
       return { label, title, description };
     })
-    .filter((item) => item.label || item.title || item.description);
+    .filter((item): item is { label: string; title: string; description: string } =>
+      Boolean(item?.label || item?.title || item?.description)
+    );
+
+  if (normalized.length) {
+    return normalized;
+  }
+
+  const evidenceTimeline = buildTimelineFromEvidence(fallbackParts);
+
+  if (evidenceTimeline.length) {
+    return evidenceTimeline;
+  }
+
+  return buildTimelineFromTranscripts(transcripts);
+}
+
+function isPlaceholderDoctorTimelineItem(
+  item: NonNullable<DoctorOutput["timeline"]>[number]
+) {
+  const label = item.label?.trim() || item.time?.trim() || "";
+  const title = item.title?.trim() || item.role?.trim() || "";
+  const description = item.description?.trim() || item.script?.trim() || "";
+
+  return (
+    (!item.label && !item.title && !item.description && Boolean(item.time || item.role || item.script)) ||
+    (/^\d+$/.test(label) && title === "拍摄段落") ||
+    title === "拍摄段落" ||
+    /完整口播稿对应内容拍摄|按完整口播稿/.test(description)
+  );
+}
+
+function buildTimelineFromEvidence(parts: string[]) {
+  const timePattern =
+    /((?:\d{1,2}:)?\d{1,2}(?:\.\d+)?\s*(?:-|~|—|–|到)\s*(?:\d{1,2}:)?\d{1,2}(?:\.\d+)?\s*(?:s|秒)?)/i;
+
+  return parts
+    .map((part) => {
+      const match = part.match(timePattern);
+
+      if (!match) {
+        return null;
+      }
+
+      const label = match[1].replace(/\s+/g, "").replace(/秒/g, "s");
+      const rest = part.replace(match[0], "").replace(/^[:：,，\s-]+/, "").trim();
+      const [firstSentence = rest] = rest.split(/[。；;]/);
+
+      return {
+        label,
+        title: firstSentence.trim() || "这一段是关键掉点",
+        description: rest || part
+      };
+    })
+    .filter((item): item is { label: string; title: string; description: string } => Boolean(item));
+}
+
+function buildTimelineFromTranscripts(transcripts: VideoTranscript[]) {
+  const utterances = transcripts
+    .flatMap((transcript) => transcript.utterances ?? [])
+    .filter((utterance) => utterance.text.trim())
+    .sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+
+  if (!utterances.length) {
+    const text = transcripts.map((transcript) => transcript.text).filter(Boolean).join("\n").trim();
+
+    return text
+      ? [
+          {
+            label: "口播稿",
+            title: "先按原文复盘",
+            description: `原文内容是：“${text.slice(0, 140)}${text.length > 140 ? "..." : ""}”。建议重新分析一次，让 Doctor 根据带时间口播稿生成具体掉点。`
+          }
+        ]
+      : [];
+  }
+
+  const itemCount = Math.min(5, utterances.length);
+  const chunkSize = Math.max(1, Math.ceil(utterances.length / itemCount));
+  const titles = ["开头信息进入速度", "承诺和方法是否清楚", "中段信息推进", "后段是否继续给价值", "结尾行动是否明确"];
+
+  return Array.from({ length: itemCount })
+    .map((_, index) => {
+      const chunk = utterances.slice(index * chunkSize, (index + 1) * chunkSize);
+
+      if (!chunk.length) {
+        return null;
+      }
+
+      const text = chunk.map((utterance) => utterance.text).join("");
+      const start = chunk[0];
+      const end = chunk[chunk.length - 1];
+
+      return {
+        label: formatTranscriptTimeRange({
+          ...start,
+          endTimeMs: end.endTimeMs,
+          endTimeSeconds: end.endTimeSeconds
+        }),
+        title: titles[index] || "这一段需要重点复盘",
+        description: `这一段原文是：“${text.slice(0, 120)}${text.length > 120 ? "..." : ""}”。如果这里没有继续给出判断、方法或转折，就会让观众感觉信息停住；建议把具体收益或下一步动作提前。`
+      };
+    })
+    .filter((item): item is { label: string; title: string; description: string } => Boolean(item));
 }
 
 async function fileToVisualDataUrl(file: File) {
@@ -1196,7 +1304,7 @@ export function DoctorStudio({ initialSessionId }: { initialSessionId?: string }
       : fallbackOutput;
   const scriptBody = getScriptBody(output);
   const transcripts = getSessionTranscripts(session);
-  const timelineItems = normalizeDoctorTimeline(output.timeline, output.evidence || output.mainIssue);
+  const timelineItems = normalizeDoctorTimeline(output.timeline, output.evidence || output.mainIssue, transcripts);
   const hasTranscriptEvidence = transcripts.length > 0;
   const hasTimelineEvidence = timelineItems.length > 0;
   const hasEvidence = hasTimelineEvidence;

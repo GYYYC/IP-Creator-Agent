@@ -214,6 +214,12 @@ comment_direction:
 11. 如果 notes 或 analysisFocus 写了“帮我看某一段/某一屏/某个问题”，必须围绕该位置给结论，不要强行改成留存曲线分析。
 12. 所有页面文案面向用户当前作品，不要说“系统”“模块”“我无法分析文件”。可以温和说明“这次先按你给的素材判断”。
 
+timeline 输出结构硬性规则：
+- timeline 必须是掉点/复盘记录，不是拍摄计划。
+- timeline 每项只能使用 { "label": "0.2-3.5s", "title": "结果钩子有冲击，但缺少目标人群入口", "description": "具体说明这一段说了什么、为什么影响停留、建议怎么改。" }。
+- 禁止在 Doctor 的 timeline 里输出 time、role、script、visual 字段；禁止写“拍摄段落”“按完整口播稿对应内容拍摄”等占位话。
+- label 要优先来自 utterances 时间段、关键帧时间点或用户给出的留存时间点；title 必须是诊断判断；description 必须包含具体原文/画面/数据证据和修改建议。
+
 重写脚本规则：
 - 当 session.input.revisionRequests 或用户回答里出现“重写、改写、按结论写脚本、生成脚本、这一版脚本”等意图时，output 必须额外包含 rewrittenScript。
 - rewrittenScript.body 必须是完整可拍摄/可发布脚本，不要只给大纲。
@@ -1568,12 +1574,38 @@ function normalizeDoctorOutput(
     return output;
   }
 
+  const sourceTimeline = rawTimeline.some((item) => !isDoctorTimelinePlaceholder(item))
+    ? rawTimeline
+    : fallbackTimeline;
+
   return {
     ...output,
-    timeline: (rawTimeline.length ? rawTimeline : fallbackTimeline).map((item, index) =>
+    timeline: sourceTimeline.map((item, index) =>
       normalizeDoctorTimelineItem(item, fallbackTimeline[index], evidenceParts, index)
     )
   };
+}
+
+function isDoctorTimelinePlaceholder(item: unknown) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return true;
+  }
+
+  const record = item as Record<string, unknown>;
+  const label = asString(record.label);
+  const title = asString(record.title);
+  const description = asString(record.description);
+  const role = asString(record.role);
+  const script = asString(record.script);
+
+  if (label || title || description) {
+    return false;
+  }
+
+  return (
+    role === "拍摄段落" ||
+    /完整口播稿对应内容拍摄|按完整口播稿/.test(script)
+  );
 }
 
 function normalizeDoctorTimelineItem(
